@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Target Management</h4>
+  <p>All audited targets aggregated from real scan records, with per-target risk summaries.</p>
+</section>
+
+<div class="wsa-card">
+  <div class="wsa-card-head">
+    <h6 class="wsa-section-title">Audited Targets <span class="wsa-pill" id="targetCount">0</span></h6>
+    <button class="btn btn-sm wsa-btn-ghost" onclick="loadTargets()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+  </div>
+  <div class="wsa-table-wrap">
+    <table class="wsa-table">
+      <thead><tr><th>Target</th><th>Scans</th><th>Last Scan</th><th>Status</th><th>High</th><th>Medium</th><th>Low</th><th>Info</th><th></th></tr></thead>
+      <tbody id="targetBody">
+        <tr><td colspan="9" class="wsa-empty"><i class="bi bi-hourglass-split"></i>Loading targets…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  async function loadTargets() {
+    const body = document.getElementById("targetBody");
+    try {
+      const d = await WSA.api("/api/targets");
+      document.getElementById("targetCount").textContent = d.targets.length;
+      if (!d.targets.length) {
+        body.innerHTML = `<tr><td colspan="9" class="wsa-empty"><i class="bi bi-globe"></i>
+          <b>No targets audited yet.</b> Start a scan and targets will be tracked here.</td></tr>`;
+        return;
+      }
+      body.innerHTML = d.targets.map((t) => `
+        <tr>
+          <td><span class="wsa-cell-strong wsa-mono wsa-truncate" style="max-width:320px;display:inline-block" title="${esc(t.target_url)}">${esc(t.target_url)}</span></td>
+          <td class="wsa-cell-strong">${t.scan_count}</td>
+          <td class="wsa-cell-muted">${WSA.ago(t.last_scan_at)}</td>
+          <td>${WSA.statusBadge(t.last_status || "pending")}</td>
+          <td>${t.findings.high ?? 0}</td>
+          <td>${t.findings.medium ?? 0}</td>
+          <td>${t.findings.low ?? 0}</td>
+          <td>${t.findings.informational ?? 0}</td>
+          <td class="text-end">
+            <a class="btn btn-sm wsa-btn-ghost" href="/vulnerabilities?search=${encodeURIComponent(t.target_url)}">Findings</a>
+            <a class="btn btn-sm wsa-btn-primary" href="/scan/new">Rescan</a>
+          </td>
+        </tr>`).join("");
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="9"><div class="wsa-error">${esc(e.message)}</div></td></tr>`;
+    }
+  }
+
+  WSA.refreshers.push(() => loadTargets());
+  loadTargets();
+})();
+</script>
+{% endblock %}

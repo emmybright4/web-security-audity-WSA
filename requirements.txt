@@ -1,0 +1,21 @@
+# WSA - Web Security Auditing :: Python dependencies
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+Flask-Migrate==4.0.7
+Flask-SocketIO==5.3.6
+Flask-CORS==4.0.1
+Flask-Login==0.6.3
+python-dotenv==1.0.1
+requests==2.32.3
+cryptography==42.0.8
+reportlab==4.2.2
+celery==5.4.0
+redis==5.0.7
+eventlet==0.36.1; sys_platform != 'win32'
+# NOTE: on Windows, eventlet is intentionally NOT installed.
+# Flask-SocketIO automatically falls back to threading mode (fully supported).
+# Celery is optional: the app uses its built-in ThreadPool scanner by default.
+
+# Optional AI provider (uncomment and set AI_PROVIDER / AI_API_KEY to enable AI)
+# openai==1.35.0
+# anthropic==0.34.0

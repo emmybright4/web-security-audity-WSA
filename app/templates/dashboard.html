@@ -1,0 +1,583 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Welcome back, Emmy Bright 👋</h4>
+  <p>Your web security auditing platform. Scan, analyze, and secure with intelligent security auditing.</p>
+</section>
+
+<div id="dashError" class="wsa-error mb-3" hidden>
+  <i class="bi bi-exclamation-triangle"></i><span>Failed to load dashboard data.</span>
+  <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button>
+</div>
+
+<!-- ===================== STAT CARDS ===================== -->
+<div class="row g-3 mb-3">
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="wsa-card wsa-stat">
+      <div class="wsa-stat-icon blue"><i class="bi bi-radar"></i></div>
+      <div>
+        <div class="wsa-stat-value" id="statTotal"><span class="wsa-skeleton"></span></div>
+        <div class="wsa-stat-label">Total Scans</div>
+        <div class="wsa-stat-trend wsa-trend-flat" id="trendTotal"></div>
+      </div>
+      <canvas class="wsa-stat-spark" id="sparkTotal"></canvas>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="wsa-card wsa-stat">
+      <div class="wsa-stat-icon red"><i class="bi bi-shield-exclamation"></i></div>
+      <div>
+        <div class="wsa-stat-value" id="statHigh"><span class="wsa-skeleton"></span></div>
+        <div class="wsa-stat-label">High Risk Findings</div>
+        <div class="wsa-stat-trend wsa-trend-flat" id="trendHigh"></div>
+      </div>
+      <canvas class="wsa-stat-spark" id="sparkHigh"></canvas>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="wsa-card wsa-stat">
+      <div class="wsa-stat-icon orange"><i class="bi bi-shield-fill-exclamation"></i></div>
+      <div>
+        <div class="wsa-stat-value" id="statMedium"><span class="wsa-skeleton"></span></div>
+        <div class="wsa-stat-label">Medium Risk Findings</div>
+        <div class="wsa-stat-trend wsa-trend-flat" id="trendMedium"></div>
+      </div>
+      <canvas class="wsa-stat-spark" id="sparkMedium"></canvas>
+    </div>
+  </div>
+  <div class="col-12 col-md-6 col-xl-3">
+    <div class="wsa-card wsa-stat">
+      <div class="wsa-stat-icon green"><i class="bi bi-shield-check"></i></div>
+      <div>
+        <div class="wsa-stat-value" id="statLow"><span class="wsa-skeleton"></span></div>
+        <div class="wsa-stat-label">Low Risk Findings</div>
+        <div class="wsa-stat-trend wsa-trend-flat" id="trendLow"></div>
+      </div>
+      <canvas class="wsa-stat-spark" id="sparkLow"></canvas>
+    </div>
+  </div>
+</div>
+
+<div id="emptyBanner" class="wsa-banner-info mb-3" hidden>
+  <i class="bi bi-info-circle"></i>
+  No scans performed yet. Start your first authorized audit.
+</div>
+
+<div class="row g-3 mb-3">
+  <!-- ===================== DONUT ===================== -->
+  <div class="col-12 col-lg-5">
+    <div class="wsa-card wsa-chart-card">
+      <div class="wsa-card-head">
+        <div>
+          <h6 class="wsa-section-title">Findings Overview</h6>
+          <span class="wsa-section-sub">Live severity distribution from the database</span>
+        </div>
+        <span class="wsa-pill" id="donutTotal"><span class="wsa-skeleton wsa-skeleton-pill"></span></span>
+      </div>
+      <div id="donutLoading" class="wsa-chart-loading">
+        <span class="wsa-spinner"></span> Loading chart…
+      </div>
+      <div id="donutError" class="wsa-chart-error" hidden>
+        <i class="bi bi-wifi-off"></i>
+        <b>Couldn't load the overview.</b>
+        <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button>
+      </div>
+      <div id="donutEmpty" class="wsa-chart-empty" hidden>
+        <i class="bi bi-pie-chart"></i>
+        <b>No vulnerabilities discovered yet.</b>
+        Run a scan to populate this chart with real findings.
+      </div>
+      <div id="donutChartWrap" class="wsa-donut-wrap" hidden>
+        <div class="wsa-donut-box">
+          <canvas id="donutChart"></canvas>
+          <div class="wsa-donut-center"><b id="donutCenter">0</b><span>total findings</span></div>
+        </div>
+        <div id="donutLegend" class="wsa-donut-legend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== TREND ===================== -->
+  <div class="col-12 col-lg-7">
+    <div class="wsa-card wsa-chart-card">
+      <div class="wsa-card-head">
+        <div>
+          <h6 class="wsa-section-title">Vulnerability Trend</h6>
+          <span class="wsa-section-sub">Real findings per day from completed scans</span>
+        </div>
+        <div class="wsa-seg" role="tablist" aria-label="Trend grouping">
+          <button type="button" class="wsa-seg-btn active" id="trendModeTypes" data-mode="types">Vulnerability Types</button>
+          <button type="button" class="wsa-seg-btn" id="trendModeSev" data-mode="severity">Severity Levels</button>
+        </div>
+      </div>
+      <div class="wsa-trend-toolbar">
+        <label class="wsa-toolbar-label" for="trendDays">Date range</label>
+        <select id="trendDays" class="wsa-select wsa-select-sm">
+          <option value="7">Last 7 days</option>
+          <option value="14">Last 14 days</option>
+          <option value="30" selected>Last 30 days</option>
+          <option value="90">Last 90 days</option>
+          <option value="0">All time</option>
+        </select>
+        <div class="wsa-seg wsa-seg-compact ms-2" role="tablist" aria-label="Trend granularity">
+          <button type="button" class="wsa-seg-btn active" data-gran="day">Day</button>
+          <button type="button" class="wsa-seg-btn" data-gran="week">Week</button>
+          <button type="button" class="wsa-seg-btn" data-gran="month">Month</button>
+        </div>
+        <div class="wsa-type-filter ms-auto" id="typeFilterBox">
+          <button type="button" class="btn btn-sm wsa-btn-ghost" id="typeFilterBtn"
+                  title="Show or hide vulnerability types">
+            <i class="bi bi-sliders"></i> Filters
+          </button>
+          <div class="wsa-type-menu" id="typeFilterMenu" hidden></div>
+        </div>
+      </div>
+      <div id="trendLoading" class="wsa-chart-loading">
+        <span class="wsa-spinner"></span> Loading chart…
+      </div>
+      <div id="trendError" class="wsa-chart-error" hidden>
+        <i class="bi bi-wifi-off"></i>
+        <b>Couldn't load the trend.</b>
+        <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button>
+      </div>
+      <div id="trendEmpty" class="wsa-chart-empty" hidden>
+        <i class="bi bi-graph-up-arrow"></i>
+        <b>No trend data yet.</b>
+        Findings from your scans will be charted here over time.
+      </div>
+      <div id="trendChartWrap" class="wsa-trend-wrap" hidden>
+        <div id="trendDotLegend" class="wsa-dot-legend"></div>
+        <div style="position:relative;height:320px">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== RECENT SCANS ===================== -->
+<div class="wsa-card">
+  <div class="wsa-card-head">
+    <div>
+      <h6 class="wsa-section-title">Recent Scans</h6>
+      <span class="wsa-section-sub">Live status - updates in realtime as scans run</span>
+    </div>
+    <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">
+      <i class="bi bi-arrow-clockwise"></i> Refresh
+    </button>
+  </div>
+  <div class="wsa-table-wrap">
+    <table class="wsa-table">
+      <thead>
+        <tr><th>Target</th><th>Type</th><th>Status</th><th>Findings</th><th>Progress</th><th>Started</th><th></th></tr>
+      </thead>
+      <tbody id="recentScansBody">
+        <tr><td colspan="7" class="wsa-empty"><i class="bi bi-hourglass-split"></i>Loading scans…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const sparks = {};
+
+  // ---------- shared chart colors ----------
+  const SEV_COLORS = {
+    critical: "#7f1d1d",
+    high: "#dc2626",
+    medium: "#f59e0b",
+    low: "#16a34a",
+    informational: "#1a56db",
+  };
+  const TYPE_PALETTE = ["#1a56db", "#dc2626", "#f59e0b", "#16a34a", "#7c3aed",
+                        "#0891b2", "#db2777", "#65a30d", "#ea580c", "#4f46e5",
+                        "#0d9488", "#64748b"];
+
+  // ---------- Findings Overview (doughnut) ----------
+  const donut = (() => {
+    const el = document.getElementById("donutChart");
+    if (!el || typeof Chart === "undefined") return null;
+    return new Chart(el, {
+      type: "doughnut",
+      data: { labels: [], datasets: [{ data: [], backgroundColor: [], borderWidth: 2, borderColor: "#fff", hoverOffset: 8 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: "68%",
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const total = ctx.dataset.data.reduce((a, b) => a + b, 0) || 1;
+                const pct = Math.round((ctx.parsed / total) * 1000) / 10;
+                return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+              },
+            },
+          },
+        },
+      },
+    });
+  })();
+
+  // ---------- Vulnerability Trend (multi-line) ----------
+  let trend = null;
+  let trendMode = "types";
+  let trendDays = 30;
+  let trendGran = "day";
+  let trendMeta = { mode: "types", dates: [], series: [] };  // last server payload
+  const hiddenKeys = new Set();
+
+  function buildTrend() {
+    const el = document.getElementById("trendChart");
+    if (!el || typeof Chart === "undefined") return null;
+    const hoverRowPlugin = {
+      id: "wsaHoverRow",
+      afterDatasetsDraw(chart) {
+        const active = chart.tooltip?.getActiveElements?.() || [];
+        if (!active.length) return;
+        const { ctx, chartArea: a, scales: { x } } = chart;
+        const px = x.getPixelForValue(active[0].index);
+        ctx.save();
+        ctx.beginPath();
+        ctx.setLineDash([4, 4]);
+        ctx.lineWidth = 1.4;
+        ctx.strokeStyle = "rgba(15, 42, 92, .45)";
+        ctx.moveTo(px, a.top);
+        ctx.lineTo(px, a.bottom);
+        ctx.stroke();
+        ctx.restore();
+      },
+    };
+    return new Chart(el, {
+      type: "line",
+      data: { labels: [], datasets: [] },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: "index", intersect: false },
+        layout: { padding: { right: 8 } },
+        plugins: {
+          legend: { display: false },               // replaced by dot legend above
+          tooltip: {
+            enabled: false,                          // custom external tooltip
+            external: externalTooltip,
+          },
+        },
+        scales: {
+          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10, color: "#5b6b85", font: { size: 11 } }, border: { color: "#e3e9f4" } },
+          y: { beginAtZero: true, ticks: { precision: 0, color: "#5b6b85", font: { size: 11 } }, grid: { color: "#eef2f8" }, border: { display: false } },
+        },
+      },
+      plugins: [hoverRowPlugin],
+    });
+  }
+
+  // Reference-style dark tooltip: date header + one dot row per series.
+  function externalTooltip(context) {
+    const { chart, tooltip } = context;
+    let el = document.getElementById("wsaTrendTip");
+    if (!el) {
+      el = document.createElement("div");
+      el.id = "wsaTrendTip";
+      document.body.appendChild(el);
+    }
+    if (tooltip.opacity === 0 || !tooltip.dataPoints?.length) { el.style.opacity = "0"; return; }
+    const dp = tooltip.dataPoints.filter((p) => p.dataset.key);
+    if (!dp.length) { el.style.opacity = "0"; return; }
+    const title = dp[0].label;
+    const rows = dp.map((p) => `
+      <div class="wsa-tip-row">
+        <span class="wsa-tip-dot" style="background:${p.dataset.borderColor}"></span>
+        <span class="wsa-tip-name">${esc(p.dataset.label)}</span>
+        <b>${WSA.fmt(p.parsed.y)}</b>
+      </div>`).join("");
+    el.innerHTML = `<div class="wsa-tip-title">${esc(title)}</div>${rows}`;
+    el.style.opacity = "1";
+    const rect = chart.canvas.getBoundingClientRect();
+    const x = rect.left + window.scrollX + tooltip.caretX + 14;
+    let y = rect.top + window.scrollY + tooltip.caretY - el.offsetHeight / 2;
+    y = Math.max(rect.top + window.scrollY + 4, y);
+    const maxX = rect.left + window.scrollX + rect.width - el.offsetWidth - 8;
+    el.style.left = Math.min(x, maxX) + "px";
+    el.style.top = y + "px";
+  }
+
+  function toggleTypeKey(key) {
+    if (hiddenKeys.has(key)) hiddenKeys.delete(key); else hiddenKeys.add(key);
+    renderTrend();
+    renderTypeMenu();
+  }
+
+  function renderTrend() {
+    const chart = trend || (trend = buildTrend());
+    if (!chart) return;
+    const { dates, series } = trendMeta;
+    const visible = series.filter((s) => !hiddenKeys.has(s.key));
+    chart.data.labels = dates.map((d) => d.slice(5));  // MM-DD keeps the axis readable
+    chart.data.datasets = visible.map((s) => ({
+      key: s.key,
+      label: s.label,
+      data: s.data,
+      borderColor: s.color,
+      backgroundColor: (ctx) => {                    // vertical gradient fill under each line
+        const { ctx: c, chartArea } = ctx.chart;
+        if (!chartArea) return "transparent";
+        const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+        g.addColorStop(0, s.color + "3d");           // ~24% opacity at the line
+        g.addColorStop(1, s.color + "05");           // fade to ~2% at the axis
+        return g;
+      },
+      pointBackgroundColor: "#fff",
+      pointBorderColor: s.color,
+      pointBorderWidth: 2,
+      pointRadius: 3.5,
+      pointHoverRadius: 6,
+      pointHoverBorderWidth: 2.5,
+      borderWidth: 2.5,
+      tension: 0.35,
+      fill: true,
+      spanGaps: true,
+    }));
+    chart.update();
+    renderDotLegend(visible);
+  }
+
+  // Reference-style dot legend (click to toggle a series).
+  function renderDotLegend(visible) {
+    const box = document.getElementById("trendDotLegend");
+    if (!box) return;
+    box.innerHTML = visible.map((s) => `
+      <button type="button" class="wsa-dot-legend-item ${hiddenKeys.has(s.key) ? "off" : ""}" data-key="${esc(s.key)}">
+        <span class="wsa-dot-swatch" style="background:${s.color}"></span>${esc(s.label)}
+      </button>`).join("");
+    box.querySelectorAll(".wsa-dot-legend-item").forEach((b) => {
+      b.addEventListener("click", () => toggleTypeKey(b.dataset.key));
+    });
+  }
+
+  function renderTypeMenu() {
+    const menu = document.getElementById("typeFilterMenu");
+    if (!menu) return;
+    const { series } = trendMeta;
+    if (!series.length) { menu.innerHTML = "<div class='wsa-type-menu-empty'>No series</div>"; return; }
+    menu.innerHTML = series.map((s) => `
+      <label class="wsa-type-item ${hiddenKeys.has(s.key) ? "off" : ""}">
+        <input type="checkbox" ${hiddenKeys.has(s.key) ? "" : "checked"} data-key="${esc(s.key)}">
+        <span class="wsa-type-swatch" style="background:${s.color}"></span>
+        <span class="wsa-type-name" title="${esc(s.label)}">${esc(s.label)}</span>
+        <b>${s.total}</b>
+      </label>`).join("");
+    menu.querySelectorAll("input[type=checkbox]").forEach((cb) => {
+      cb.addEventListener("change", () => toggleTypeKey(cb.dataset.key));
+    });
+  }
+
+  // ---------- card state helper: loading | error | empty | ok ----------
+  function setChartState(prefix, state) {
+    const loading = document.getElementById(prefix + "Loading");
+    const error = document.getElementById(prefix + "Error");
+    const empty = document.getElementById(prefix + "Empty");
+    const wrap = document.getElementById(prefix + "ChartWrap");
+    if (loading) loading.style.display = state === "loading" ? "" : "none";
+    if (error) error.hidden = state !== "error";
+    if (empty) empty.hidden = state !== "empty";
+    if (wrap) wrap.hidden = state !== "ok";
+  }
+
+  function sparkline(id, color, values) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const days = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date(Date.now() - i * 86400000);
+      days.push(d.toISOString().slice(0, 10));
+    }
+    const data = days.map((d) => (values && values[d]) ? values[d] : 0);
+    if (sparks[id]) { sparks[id].data.datasets[0].data = data; sparks[id].update("none"); return; }
+    sparks[id] = new Chart(el, {
+      type: "bar",
+      data: { labels: days, datasets: [{ data, backgroundColor: color, borderRadius: 2, barPercentage: .7 }] },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { enabled: false } }, scales: { x: { display: false }, y: { display: false } } },
+    });
+  }
+
+  function setTrend(id, v) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (v === null || v === undefined) { el.className = "wsa-stat-trend wsa-trend-flat"; el.textContent = "—"; return; }
+    el.className = "wsa-stat-trend " + (v > 0 ? "wsa-trend-up" : v < 0 ? "wsa-trend-down" : "wsa-trend-flat");
+    el.innerHTML = v > 0 ? `<i class="bi bi-arrow-up-right"></i> +${v}% vs prev. period`
+                 : v < 0 ? `<i class="bi bi-arrow-down-right"></i> ${v}% vs prev. period`
+                 : `<i class="bi bi-dash"></i> 0% vs prev. period`;
+  }
+
+  async function loadSummary() {
+    try {
+      const d = await WSA.api("/api/dashboard/summary");
+      document.getElementById("dashError").hidden = true;
+      setText("statTotal", WSA.fmt(d.total_scans));
+      setText("statHigh", WSA.fmt(d.high_risk));
+      setText("statMedium", WSA.fmt(d.medium_risk));
+      setText("statLow", WSA.fmt(d.low_risk));
+      setTrend("trendTotal", d.trend?.total_scans);
+      setTrend("trendHigh", d.trend?.high);
+      setTrend("trendMedium", d.trend?.medium);
+      setTrend("trendLow", d.trend?.low);
+      document.getElementById("emptyBanner").hidden = !d.empty;
+      sparkline("sparkTotal", "#1a56db", d.sparklines);
+      sparkline("sparkHigh", "#dc2626", d.sparklines);
+      sparkline("sparkMedium", "#f59e0b", d.sparklines);
+      sparkline("sparkLow", "#16a34a", d.sparklines);
+    } catch (e) {
+      const box = document.getElementById("dashError");
+      box.hidden = false;
+      box.querySelector("span").textContent = e.message;
+    }
+  }
+
+  async function loadDonut() {
+    setChartState("donut", "loading");
+    try {
+      const d = await WSA.api("/api/dashboard/findings-overview");
+      if (d.error) throw new Error(d.error);
+      const order = ["critical", "high", "medium", "low", "informational"];
+      const labels = order.map((k) => k[0].toUpperCase() + k.slice(1));
+      const data = order.map((k) => d.counts[k] || 0);
+      const colors = order.map((k) => SEV_COLORS[k]);
+      const total = d.total || 0;
+      document.getElementById("donutTotal").textContent = WSA.fmt(total);
+      if (d.empty) { setChartState("donut", "empty"); return; }
+      setChartState("donut", "ok");
+      document.getElementById("donutCenter").textContent = WSA.fmt(total);
+      if (donut) {
+        donut.data.labels = labels;
+        donut.data.datasets[0].data = data;
+        donut.data.datasets[0].backgroundColor = colors;
+        donut.update();
+      }
+      // legend: name, count and share of total for every severity present
+      document.getElementById("donutLegend").innerHTML = order.map((k, i) => {
+        if (!data[i]) return "";
+        const pct = total ? Math.round((data[i] / total) * 1000) / 10 : 0;
+        return `<span class="wsa-legend-item">
+          <span class="wsa-legend-swatch" style="background:${colors[i]}"></span>
+          <span class="wsa-legend-name">${labels[i]}</span>
+          <b>${WSA.fmt(data[i])}</b>
+          <span class="wsa-legend-pct">${pct}%</span>
+        </span>`;
+      }).join("");
+    } catch (e) {
+      setChartState("donut", "error");
+    }
+  }
+
+  async function loadTrend() {
+    setChartState("trend", "loading");
+    try {
+      const qs = `?mode=${encodeURIComponent(trendMode)}&days=${trendDays}&gran=${trendGran}`;
+      const d = await WSA.api("/api/dashboard/vulnerability-trend" + qs);
+      if (d.error) throw new Error(d.error);
+      if (d.empty || !d.series.length) {
+        trendMeta = { mode: trendMode, dates: [], series: [] };
+        setChartState("trend", "empty");
+        renderTypeMenu();
+        return;
+      }
+      // attach stable colors per series (severity keeps its semantic color)
+      const typeColors = {};
+      let next = 0;
+      d.series.forEach((s) => {
+        if (trendMode === "severity") s.color = SEV_COLORS[s.key] || "#64748b";
+        else {
+          if (!(s.key in typeColors)) typeColors[s.key] = TYPE_PALETTE[next++ % TYPE_PALETTE.length];
+          s.color = typeColors[s.key];
+        }
+      });
+      trendMeta = { mode: trendMode, dates: d.dates, series: d.series };
+      setChartState("trend", "ok");
+      renderTrend();
+      renderTypeMenu();
+    } catch (e) {
+      setChartState("trend", "error");
+    }
+  }
+
+  // Day/Week/Month granularity: bucket raw daily points server-side by re-fetching.
+  function initGranularity() {
+    document.querySelectorAll("[data-gran]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.classList.contains("active")) return;
+        document.querySelectorAll("[data-gran]").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        trendGran = btn.dataset.gran;
+        loadTrend();
+      });
+    });
+  }
+
+  async function loadRecent() {
+    const body = document.getElementById("recentScansBody");
+    try {
+      const d = await WSA.api("/api/scans?limit=8");
+      if (!d.scans.length) {
+        body.innerHTML = `<tr><td colspan="7" class="wsa-empty">
+          <i class="bi bi-radar"></i><b>No scans performed yet.</b>
+          Start your first authorized audit from the New Scan page.</td></tr>`;
+        return;
+      }
+      body.innerHTML = d.scans.map((s) => {
+        const pctDone = s.progress ?? 0;
+        return `<tr>
+          <td><div class="wsa-cell-strong wsa-truncate" title="${esc(s.target_url)}">${esc(s.target_url)}</div>
+              <div class="wsa-cell-muted">#${s.id}${s.current_step ? " · " + esc(s.current_step) : ""}</div></td>
+          <td><span class="wsa-pill">${esc(s.scan_type)}</span></td>
+          <td>${WSA.statusBadge(s.status)}</td>
+          <td class="wsa-cell-strong">${s.findings_count ?? 0}</td>
+          <td style="min-width:140px">
+            <div class="wsa-progress"><div class="wsa-progress-bar ${s.status === "completed" ? "done" : s.status === "failed" ? "failed" : ""}" style="width:${pctDone}%"></div></div>
+            <div class="wsa-cell-muted">${pctDone}%</div>
+          </td>
+          <td class="wsa-cell-muted">${WSA.ago(s.started_at || s.created_at)}</td>
+          <td class="text-end"><a class="btn btn-sm wsa-btn-primary" href="/scans/${s.id}">View Results</a></td>
+        </tr>`;
+      }).join("");
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="7"><div class="wsa-error"><i class="bi bi-wifi-off"></i>
+        <span>${esc(e.message)}</span><button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button></div></td></tr>`;
+    }
+  }
+
+  function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  // ---------- trend controls (mode switch, date range, type filter) ----------
+  function initTrendControls() {
+    document.querySelectorAll(".wsa-seg-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.mode === trendMode) return;
+        document.querySelectorAll(".wsa-seg-btn").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        trendMode = btn.dataset.mode;
+        hiddenKeys.clear();          // reset per-view visibility
+        loadTrend();
+      });
+    });
+    const days = document.getElementById("trendDays");
+    days?.addEventListener("change", () => { trendDays = parseInt(days.value, 10) || 0; loadTrend(); });
+
+    const fBtn = document.getElementById("typeFilterBtn");
+    const fMenu = document.getElementById("typeFilterMenu");
+    fBtn?.addEventListener("click", (e) => { e.stopPropagation(); fMenu.hidden = !fMenu.hidden; });
+    document.addEventListener("click", (e) => {
+      if (fMenu && !fMenu.hidden && !fMenu.contains(e.target) && e.target !== fBtn) fMenu.hidden = true;
+    });
+  }
+  initTrendControls();
+  initGranularity();
+
+  WSA.refreshers.push(() => { loadSummary(); loadDonut(); loadTrend(); loadRecent(); });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Tools &amp; Integrations</h4>
+  <p>Real connection status for every security engine - checked live against your environment.</p>
+</section>
+
+<div class="mb-3 d-flex gap-2">
+  <button class="wsa-btn wsa-btn-primary" id="testAllBtn"><i class="bi bi-plug"></i> Test All Connections</button>
+  <button class="wsa-btn wsa-btn-ghost" id="refreshBtn"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+</div>
+
+<div class="row g-3" id="toolsGrid">
+  <div class="col-12 col-md-6 col-xl-4"><div class="wsa-card"><div class="wsa-empty"><i class="bi bi-hourglass-split wsa-spin"></i>Checking tools…</div></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const ICONS = {
+    "OWASP ZAP": "bi-shield-lock", "ZAP-MCP": "bi-cpu", "Playwright": "bi-browser-chrome",
+    "Nuclei": "bi-lightning", "gosqli": "bi-database-exclamation", "AI / LLM": "bi-stars",
+  };
+  const DESCS = {
+    "OWASP ZAP": "Industry-standard spider + active scanner via its JSON API.",
+    "ZAP-MCP": "AI-assisted ZAP workflows over the Model Context Protocol.",
+    "Playwright": "Headless-browser crawling for modern JavaScript applications.",
+    "Nuclei": "Fast template-based vulnerability scanning.",
+    "gosqli": "Authorized time-based SQL injection testing module.",
+    "AI / LLM": "LLM analysis for explanations, summaries and fixes.",
+  };
+  const STATUS_CLASS = { connected: "completed", disconnected: "pending", not_configured: "pending", error: "failed" };
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  async function loadTools() {
+    const grid = document.getElementById("toolsGrid");
+    try {
+      const d = await WSA.api("/api/tools");
+      if (!d.tools.length) { grid.innerHTML = '<div class="col-12"><div class="wsa-error">No tools registered.</div></div>'; return; }
+      grid.innerHTML = d.tools.map((t) => `
+        <div class="col-12 col-md-6 col-xl-4">
+          <div class="wsa-card h-100">
+            <div class="d-flex align-items-start gap-3 mb-3">
+              <div class="wsa-stat-icon blue" style="width:46px;height:46px;font-size:20px"><i class="bi ${ICONS[t.name] || "bi-gear"}"></i></div>
+              <div class="flex-grow-1">
+                <div class="wsa-cell-strong">${esc(t.name)}</div>
+                <div class="wsa-cell-muted">${DESCS[t.name] || ""}</div>
+              </div>
+              <span class="wsa-status ${STATUS_CLASS[t.status] || "pending"}">${esc(t.status)}</span>
+            </div>
+            ${t.version ? `<div class="wsa-cell-muted mb-2"><i class="bi bi-tag"></i> Version: <b>${esc(t.version)}</b></div>` : ""}
+            ${t.detail ? `<div class="wsa-hint mb-2">${esc(t.detail)}</div>` : ""}
+            <div class="d-flex gap-2 mt-auto pt-2">
+              <button class="btn btn-sm wsa-btn-ghost" onclick="testTool('${esc(t.name)}')"><i class="bi bi-arrow-repeat"></i> Test Connection</button>
+              <a class="btn btn-sm wsa-btn-ghost" href="/settings"><i class="bi bi-gear"></i> Configuration</a>
+            </div>
+          </div>
+        </div>`).join("");
+    } catch (e) {
+      grid.innerHTML = `<div class="col-12"><div class="wsa-error">${esc(e.message)}</div></div>`;
+    }
+  }
+
+  window.testTool = async function (name) {
+    WSA.toast("Testing " + name + "…");
+    try {
+      const d = await WSA.api("/api/tools/test", { method: "POST" });
+      WSA.toast(d.message, "success");
+      loadTools();
+    } catch (e) { WSA.toast(e.message, "error"); }
+  };
+
+  document.getElementById("testAllBtn").addEventListener("click", () => window.testTool("all"));
+  document.getElementById("refreshBtn").addEventListener("click", loadTools);
+
+  WSA.refreshers.push(() => loadTools());
+  loadTools();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>WSA - {{ title }} | Web Security Auditing</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path fill='%231a56db' d='M12 2l8 3v6c0 5-3.4 9.4-8 11-4.6-1.6-8-6-8-11V5l8-3z'/></svg>">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='css/wsa.css') }}" rel="stylesheet">
+  {% block head %}{% endblock %}
+</head>
+<body>
+<div class="wsa-shell">
+
+  <!-- ======================= SIDEBAR ======================= -->
+  <aside class="wsa-sidebar" id="wsaSidebar">
+    <button class="wsa-sidebar-toggle" id="wsaCollapseBtn" type="button"
+            aria-label="Toggle sidebar" aria-expanded="true" title="Collapse sidebar">
+      <i class="bi bi-chevron-left"></i>
+    </button>
+    <div class="wsa-brand">
+      <div class="wsa-logo"><i class="bi bi-shield-shaded"></i></div>
+      <div class="wsa-brand-text">
+        <div class="wsa-brand-name">WSA</div>
+        <div class="wsa-brand-sub">Web Security Auditing</div>
+      </div>
+    </div>
+
+    <nav class="wsa-nav">
+      {% for item in nav_items %}
+      <a href="{{ url_for(item.endpoint) }}" data-label="{{ item.label }}"
+         class="wsa-nav-link {{ 'active' if active == item.endpoint }}">
+        <i class="bi bi-{{ item.icon }}"></i><span>{{ item.label }}</span>
+      </a>
+      {% endfor %}
+    </nav>
+
+    <div class="wsa-sidebar-footer">
+      <div class="wsa-conn" id="wsaConnBadge">
+        <span class="wsa-dot"></span> <span class="wsa-conn-label">Live &middot; realtime</span>
+      </div>
+      <div class="wsa-version">WSA v1.0.0</div>
+      <div class="wsa-slogan">Built for a safer web</div>
+    </div>
+  </aside>
+  <div class="wsa-sidebar-backdrop" id="wsaBackdrop"></div>
+
+  <!-- ======================= WORKSPACE ======================= -->
+  <div class="wsa-workspace">
+    <header class="wsa-topbar">
+      <button class="wsa-burger" id="wsaBurger" aria-label="Toggle menu"><i class="bi bi-list"></i></button>
+      <div class="wsa-search">
+        <i class="bi bi-search"></i>
+        <input type="search" id="globalSearch" placeholder="Search scans, targets, findings...">
+      </div>
+      <div class="wsa-topbar-right">
+        <div class="wsa-last-updated" id="lastUpdated"><i class="bi bi-clock-history"></i> Just loaded</div>
+        <button class="wsa-bell" id="notifBell" title="Notifications">
+          <i class="bi bi-bell"></i><span class="wsa-badge" id="notifCount" hidden>0</span>
+        </button>
+        <div class="wsa-notif-panel" id="notifPanel" hidden>
+          <div class="wsa-notif-head">Notifications</div>
+          <div id="notifList"><div class="wsa-notif-empty">No notifications yet.</div></div>
+        </div>
+        <a class="btn btn-primary wsa-btn-new" href="{{ url_for('main.new_scan') }}">
+          <i class="bi bi-plus-lg"></i> New Scan
+        </a>
+        <div class="wsa-user">
+          <div class="wsa-avatar">EB</div>
+          <div class="wsa-user-meta d-none d-md-block">
+            <div class="wsa-user-name">Emmy Bright</div>
+            <div class="wsa-user-role">IT Student</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="wsa-content">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="wsa-footer">
+      WSA - Discover. Analyze. Secure. &nbsp;&middot;&nbsp; Authorized testing only.
+    </footer>
+  </div>
+</div>
+
+<div class="wsa-toasts" id="wsaToasts"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<script>window.WSA_POLL_SECONDS = {{ config.POLLING_FALLBACK_SECONDS if config else 4 }};</script>
+<script src="{{ url_for('static', filename='js/wsa.js') }}"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

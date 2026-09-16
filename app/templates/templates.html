@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Scan Templates</h4>
+  <p>Reusable scan configurations. Launch a scan directly from a template.</p>
+</section>
+
+<div class="row g-3" id="tplGrid">
+  <div class="col-12"><div class="wsa-card"><div class="wsa-empty"><i class="bi bi-hourglass-split"></i>Loading templates…</div></div></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const grid = document.getElementById("tplGrid");
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  function flags(o) {
+    const list = [];
+    if (o.playwright_enabled) list.push("Playwright");
+    if (o.zap_enabled) list.push("ZAP");
+    if (o.nuclei_enabled) list.push("Nuclei");
+    if (o.sqli_enabled) list.push("SQLi");
+    if (o.ai_assist) list.push("AI");
+    return list;
+  }
+
+  async function loadTpls() {
+    try {
+      const d = await WSA.api("/api/templates");
+      if (!d.templates.length) {
+        grid.innerHTML = `<div class="col-12"><div class="wsa-card"><div class="wsa-empty">
+          <i class="bi bi-layout-template"></i><b>No templates saved yet.</b>
+          Configure a scan on the New Scan page and click "Save Template".</div></div></div>`;
+        return;
+      }
+      grid.innerHTML = d.templates.map((t) => {
+        const f = flags(t.options || {});
+        return `<div class="col-12 col-md-6 col-xl-4">
+          <div class="wsa-card h-100 d-flex flex-column">
+            <div class="wsa-card-head">
+              <div>
+                <div class="wsa-cell-strong">${esc(t.name)}</div>
+                <div class="wsa-cell-muted">${esc(t.description || "No description")}</div>
+              </div>
+            </div>
+            <div class="mb-2">
+              <span class="wsa-pill">${esc(t.options?.scan_type || "custom")}</span>
+              ${f.map((x) => `<span class="wsa-pill">${esc(x)}</span>`).join(" ")}
+            </div>
+            <div class="d-flex gap-2 mt-auto pt-2">
+              <input class="wsa-input" id="tplUrl${t.id}" placeholder="https://target-url" style="flex:1">
+              <button class="btn btn-sm wsa-btn-primary" onclick="launchTpl(${t.id})"><i class="bi bi-play-fill"></i> Run</button>
+              <button class="btn btn-sm wsa-btn-danger" onclick="delTpl(${t.id})"><i class="bi bi-trash"></i></button>
+            </div>
+          </div>
+        </div>`;
+      }).join("");
+    } catch (e) {
+      grid.innerHTML = `<div class="col-12"><div class="wsa-error">${esc(e.message)}</div></div>`;
+    }
+  }
+
+  window.launchTpl = async function (id) {
+    const url = document.getElementById("tplUrl" + id).value.trim();
+    if (!url) { WSA.toast("Enter a target URL for this template.", "warn"); return; }
+    try {
+      const d = await WSA.api(`/api/scans/from-template/${id}`, {
+        method: "POST", body: JSON.stringify({ target_url: url, authorized: "true" }),
+      });
+      WSA.toast(`Scan #${d.scan.id} started from template.`, "success");
+      location.href = "/scans/" + d.scan.id;
+    } catch (e) { WSA.toast(e.message, "error", 7000); }
+  };
+
+  window.delTpl = async function (id) {
+    if (!confirm("Delete this template?")) return;
+    try {
+      await WSA.api("/api/templates/" + id, { method: "DELETE" });
+      WSA.toast("Template deleted.", "success");
+      loadTpls();
+    } catch (e) { WSA.toast(e.message, "error"); }
+  };
+
+  WSA.refreshers.push(() => loadTpls());
+  loadTpls();
+})();
+</script>
+{% endblock %}

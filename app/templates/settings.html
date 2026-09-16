@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Settings</h4>
+  <p>Platform preferences and security engine configuration.</p>
+</section>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-6">
+    <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">General Preferences</h6></div>
+      <form id="settingsForm">
+        <div class="mb-3">
+          <label class="wsa-label" for="sDefaultType">Default scan type</label>
+          <select class="wsa-select" id="sDefaultType">
+            <option value="quick">Quick</option>
+            <option value="full">Full</option>
+            <option value="custom">Custom</option>
+          </select>
+        </div>
+        <div class="mb-3">
+          <label class="wsa-label" for="sPolling">Polling fallback interval (seconds)</label>
+          <input class="wsa-input" type="number" min="2" max="60" id="sPolling">
+          <div class="wsa-hint">Used when Socket.IO is unavailable.</div>
+        </div>
+        <div class="mb-3">
+          <label class="wsa-label" for="sMaxPages">Default max pages per crawl</label>
+          <input class="wsa-input" type="number" min="1" max="200" id="sMaxPages">
+        </div>
+        <div class="form-check form-switch mb-2">
+          <input class="form-check-input" type="checkbox" id="sNotifs" checked>
+          <label class="form-check-label wsa-label mb-0" for="sNotifs">Enable notifications</label>
+        </div>
+        <button class="wsa-btn wsa-btn-primary mt-2" type="submit"><i class="bi bi-check-lg"></i> Save Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-6">
+    <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Engine Configuration</h6></div>
+      <div class="wsa-cell-muted" style="font-size:13px">
+        Set these variables in your <span class="wsa-mono">.env</span> file, then restart WSA.
+        Tools without configuration show <b>Not configured</b> on the Tools page — never a fake status.
+      </div>
+      <table class="wsa-table mt-3">
+        <thead><tr><th>Tool</th><th>Environment variables</th></tr></thead>
+        <tbody>
+          <tr><td class="wsa-cell-strong">OWASP ZAP</td><td class="wsa-mono">ZAP_API_URL, ZAP_API_KEY</td></tr>
+          <tr><td class="wsa-cell-strong">ZAP-MCP</td><td class="wsa-mono">ZAP_MCP_URL</td></tr>
+          <tr><td class="wsa-cell-strong">Nuclei</td><td class="wsa-mono">NUCLEI_BIN</td></tr>
+          <tr><td class="wsa-cell-strong">gosqli</td><td class="wsa-mono">GOSQLI_BIN</td></tr>
+          <tr><td class="wsa-cell-strong">AI / LLM</td><td class="wsa-mono">AI_PROVIDER, AI_API_KEY, AI_MODEL, AI_BASE_URL</td></tr>
+        </tbody>
+      </table>
+      <a class="wsa-btn wsa-btn-ghost mt-3" href="/tools"><i class="bi bi-plug"></i> Check tool status</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  async function loadSettings() {
+    try {
+      const d = await WSA.api("/api/settings");
+      const s = d.settings;
+      $("sDefaultType").value = s.default_scan_type || "quick";
+      $("sPolling").value = s.polling_fallback_seconds ?? 4;
+      $("sMaxPages").value = s.max_pages ?? 12;
+      $("sNotifs").checked = !!s.notifications_enabled;
+    } catch (e) { WSA.toast(e.message, "error"); }
+  }
+
+  $("settingsForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await WSA.api("/api/settings", {
+        method: "PUT",
+        body: JSON.stringify({
+          default_scan_type: $("sDefaultType").value,
+          polling_fallback_seconds: parseFloat($("sPolling").value) || 4,
+          max_pages: parseInt($("sMaxPages").value) || 12,
+          notifications_enabled: $("sNotifs").checked,
+        }),
+      });
+      window.WSA_POLL_SECONDS = parseFloat($("sPolling").value) || 4;
+      WSA.toast("Settings saved.", "success");
+    } catch (err) { WSA.toast(err.message, "error"); }
+  });
+
+  loadSettings();
+})();
+</script>
+{% endblock %}

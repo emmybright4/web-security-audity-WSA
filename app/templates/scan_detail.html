@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="d-flex align-items-center justify-content-between mb-4 flex-wrap gap-2">
+  <div>
+    <h4 class="mb-1" style="font-weight:800;color:var(--wsa-navy)">
+      Scan #<span id="scanId">{{ scan_id }}</span>
+    </h4>
+    <div class="wsa-cell-muted" id="scanTarget">Loading…</div>
+  </div>
+  <div class="d-flex gap-2">
+    <button class="wsa-btn wsa-btn-ghost" id="cancelBtn" hidden><i class="bi bi-x-circle"></i> Cancel Scan</button>
+    <button class="wsa-btn wsa-btn-primary" id="genReportBtn"><i class="bi bi-file-earmark-pdf"></i> Generate PDF Report</button>
+  </div>
+</div>
+
+<div class="row g-3 mb-3">
+  <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Status</div><div id="scanStatus" class="mt-2">—</div></div></div>
+  <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Progress</div><div class="wsa-progress mt-2"><div class="wsa-progress-bar" id="scanProgress" style="width:0%"></div></div></div></div>
+  <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Findings</div><div class="wsa-stat-value mt-1" id="scanFindings">0</div></div></div>
+  <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Duration</div><div class="wsa-stat-value mt-1" style="font-size:20px" id="scanDuration">—</div></div></div>
+</div>
+
+<div class="wsa-card mb-3" id="stepCard" hidden>
+  <div class="wsa-cell-muted"><i class="bi bi-activity"></i> <span id="scanStep">—</span></div>
+</div>
+
+<div class="wsa-card mb-3" id="errCard" hidden>
+  <div class="wsa-error"><i class="bi bi-exclamation-octagon"></i><span id="scanError"></span></div>
+</div>
+
+<div class="wsa-card">
+  <div class="wsa-card-head">
+    <h6 class="wsa-section-title">Findings</h6>
+    <span class="wsa-pill" id="findingsPill">0</span>
+  </div>
+  <div class="wsa-table-wrap">
+    <table class="wsa-table">
+      <thead><tr><th>Severity</th><th>Finding</th><th>Endpoint</th><th>Detected by</th><th>Time</th></tr></thead>
+      <tbody id="findingsBody">
+        <tr><td colspan="5" class="wsa-empty"><i class="bi bi-hourglass-split"></i>Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const SCAN_ID = {{ scan_id | int }};
+  const $ = (id) => document.getElementById(id);
+  let done = false;
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  async function load() {
+    try {
+      const d = await WSA.api("/api/scans/" + SCAN_ID);
+      render(d);
+    } catch (e) {
+      WSA.toast(e.message, "error");
+    }
+  }
+
+  function render(d) {
+    const s = d.scan;
+    $("scanTarget").textContent = s.target_url;
+    $("scanStatus").innerHTML = WSA.statusBadge(s.status);
+    $("scanProgress").style.width = (s.progress ?? 0) + "%";
+    $("scanProgress").className = "wsa-progress-bar " + (s.status === "completed" ? "done" : s.status === "failed" ? "failed" : "");
+    $("scanFindings").textContent = WSA.fmt(d.vulnerabilities.length);
+    $("findingsPill").textContent = d.vulnerabilities.length;
+    $("scanDuration").textContent = s.duration_seconds != null ? s.duration_seconds + "s" : "—";
+    $("scanStep").textContent = s.current_step || "—";
+    $("stepCard").hidden = !s.current_step;
+    const active = ["pending", "running"].includes(s.status);
+    $("cancelBtn").hidden = !active;
+    if (s.error_message) { $("errCard").hidden = false; $("scanError").textContent = s.error_message; }
+
+    const body = $("findingsBody");
+    if (!d.vulnerabilities.length) {
+      body.innerHTML = `<tr><td colspan="5" class="wsa-empty"><i class="bi bi-shield-check"></i>
+        <b>${active ? "Scan in progress - findings appear here in realtime." : "No findings recorded for this scan."}</b></td></tr>`;
+    } else {
+      body.innerHTML = d.vulnerabilities.map((v) => `
+        <tr>
+          <td>${WSA.sevBadge(v.severity)}</td>
+          <td><div class="wsa-cell-strong">${esc(v.name)}</div>
+              <div class="wsa-cell-muted">${esc((v.description || "").slice(0, 90))}…</div></td>
+          <td><span class="wsa-mono wsa-truncate" title="${esc(v.url || v.target_url)}">${esc(v.url || v.target_url)}</span></td>
+          <td class="wsa-cell-muted">${esc(v.detected_by)}</td>
+          <td class="wsa-cell-muted">${WSA.ago(v.created_at)}</td>
+        </tr>`).join("");
+    }
+    if (["completed", "failed", "cancelled"].includes(s.status)) done = true;
+  }
+
+  $("cancelBtn").addEventListener("click", async () => {
+    try {
+      await WSA.api(`/api/scans/${SCAN_ID}/cancel`, { method: "POST" });
+      WSA.toast("Cancellation requested.", "warn");
+      load();
+    } catch (e) { WSA.toast(e.message, "error"); }
+  });
+
+  $("genReportBtn").addEventListener("click", async () => {
+    const btn = $("genReportBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split wsa-spin"></i> Generating…';
+    try {
+      const d = await WSA.api("/api/reports/generate", {
+        method: "POST", body: JSON.stringify({ scan_id: SCAN_ID }),
+      });
+      WSA.toast("Report generated.", "success");
+      window.open(`/api/reports/${d.report.id}/view`, "_blank");
+    } catch (e) {
+      WSA.toast(e.message, "error", 7000);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-file-earmark-pdf"></i> Generate PDF Report';
+    }
+  });
+
+  WSA.refreshers.push((evt) => {
+    if (done) return;
+    if (evt && evt.scan_id !== undefined && evt.scan_id !== SCAN_ID) return;
+    load();
+  });
+  load();
+})();
+</script>
+{% endblock %}

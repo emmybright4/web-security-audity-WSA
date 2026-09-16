@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Vulnerability Findings</h4>
+  <p>All findings recorded by WSA security engines, loaded live from the database.</p>
+</section>
+
+<div class="wsa-card mb-3">
+  <div class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="wsa-label">Search</label>
+      <input class="wsa-input" id="fSearch" placeholder="Name, description, endpoint…">
+    </div>
+    <div class="col-md-2">
+      <label class="wsa-label">Severity</label>
+      <select class="wsa-select" id="fSeverity">
+        <option value="">All</option>
+        <option value="high">High</option>
+        <option value="medium">Medium</option>
+        <option value="low">Low</option>
+        <option value="info">Informational</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="wsa-label">Target</label>
+      <select class="wsa-select" id="fTarget"><option value="">All targets</option></select>
+    </div>
+    <div class="col-md-2">
+      <label class="wsa-label">Sort</label>
+      <select class="wsa-select" id="fSort">
+        <option value="newest">Newest first</option>
+        <option value="oldest">Oldest first</option>
+        <option value="name">Name A-Z</option>
+      </select>
+    </div>
+    <div class="col-md-1 d-grid">
+      <button class="wsa-btn wsa-btn-primary" id="applyBtn"><i class="bi bi-funnel"></i></button>
+    </div>
+  </div>
+</div>
+
+<div class="wsa-card">
+  <div class="wsa-card-head">
+    <h6 class="wsa-section-title">Findings <span class="wsa-pill" id="vulnCount">0</span></h6>
+    <button class="btn btn-sm wsa-btn-ghost" onclick="loadVulns()"><i class="bi bi-arrow-clockwise"></i> Refresh</button>
+  </div>
+  <div class="wsa-table-wrap">
+    <table class="wsa-table">
+      <thead><tr><th>#</th><th>Vulnerability</th><th>Severity</th><th>Target</th><th>Status</th><th>Actions</th></tr></thead>
+      <tbody id="vulnBody">
+        <tr><td colspan="6" class="wsa-empty"><i class="bi bi-hourglass-split"></i>Loading findings…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ============ Detail modal ============ -->
+<div class="wsa-modal-backdrop" id="vulnModal" hidden>
+  <div class="wsa-modal">
+    <div class="wsa-modal-head">
+      <b>Finding Details</b>
+      <button class="wsa-btn wsa-btn-ghost wsa-btn-sm" onclick="closeModal()"><i class="bi bi-x-lg"></i></button>
+    </div>
+    <div class="wsa-modal-body" id="vulnDetail">Loading…</div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const params = new URLSearchParams(location.search);
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  async function loadTargets() {
+    try {
+      const d = await WSA.api("/api/vulnerabilities/targets");
+      $("fTarget").innerHTML = '<option value="">All targets</option>' +
+        d.targets.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join("");
+    } catch (_) {}
+  }
+
+  async function loadVulns() {
+    const q = new URLSearchParams();
+    if ($("fSearch").value.trim()) q.set("search", $("fSearch").value.trim());
+    if ($("fSeverity").value) q.set("severity", $("fSeverity").value);
+    if ($("fTarget").value) q.set("target", $("fTarget").value);
+    if ($("fSort").value) q.set("sort", $("fSort").value);
+    const body = $("vulnBody");
+    try {
+      const d = await WSA.api("/api/vulnerabilities?" + q.toString());
+      $("vulnCount").textContent = d.count;
+      if (!d.vulnerabilities.length) {
+        body.innerHTML = `<tr><td colspan="6" class="wsa-empty"><i class="bi bi-bug"></i>
+          <b>No findings match.</b> Findings appear here after scans discover real vulnerabilities.</td></tr>`;
+        return;
+      }
+      body.innerHTML = d.vulnerabilities.map((v) => `
+        <tr>
+          <td class="wsa-cell-muted">${v.id}</td>
+          <td><div class="wsa-cell-strong">${esc(v.name)}</div>
+              <div class="wsa-cell-muted wsa-truncate">${esc((v.description || "").slice(0, 80))}</div></td>
+          <td>${WSA.sevBadge(v.severity)}</td>
+          <td><span class="wsa-mono wsa-truncate" title="${esc(v.target_url)}">${esc(v.target_url)}</span></td>
+          <td><span class="wsa-status ${v.status === "resolved" ? "completed" : v.status === "false_positive" ? "cancelled" : "pending"}">${v.status}</span></td>
+          <td class="text-end">
+            <button class="btn btn-sm wsa-btn-ghost" onclick="showVuln(${v.id})">View</button>
+          </td>
+        </tr>`).join("");
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="6"><div class="wsa-error"><i class="bi bi-wifi-off"></i>
+        <span>${esc(e.message)}</span><button class="btn btn-sm wsa-btn-ghost" onclick="loadVulns()">Retry</button></div></td></tr>`;
+    }
+  }
+
+  window.showVuln = async function (id) {
+    $("vulnModal").hidden = false;
+    $("vulnDetail").innerHTML = "Loading…";
+    try {
+      const d = await WSA.api("/api/vulnerabilities/" + id);
+      const v = d.vulnerability;
+      $("vulnDetail").innerHTML = `
+        <div class="d-flex align-items-center gap-2 mb-3">
+          ${WSA.sevBadge(v.severity)}
+          <b style="color:var(--wsa-navy)">${esc(v.name)}</b>
+          <span class="ms-auto wsa-cell-muted">#${v.id} · scan #${v.scan_id ?? "-"}</span>
+        </div>
+        <table class="wsa-table mb-3">
+          <tr><td class="wsa-cell-muted" style="width:130px">Confidence</td><td>${esc(v.confidence)}</td></tr>
+          <tr><td class="wsa-cell-muted">Target</td><td class="wsa-mono">${esc(v.target_url)}</td></tr>
+          <tr><td class="wsa-cell-muted">Endpoint</td><td class="wsa-mono">${esc(v.url || "-")}</td></tr>
+          <tr><td class="wsa-cell-muted">Detected by</td><td>${esc(v.detected_by)}</td></tr>
+          <tr><td class="wsa-cell-muted">Created</td><td>${esc((v.created_at || "").replace("T", " ").slice(0, 19))}</td></tr>
+        </table>
+        <label class="wsa-label">Description</label><p class="wsa-mono" style="white-space:pre-wrap">${esc(v.description) || "-"}</p>
+        <label class="wsa-label">Evidence</label><p class="wsa-mono" style="white-space:pre-wrap">${esc(v.evidence) || "-"}</p>
+        <label class="wsa-label">Remediation</label><p style="white-space:pre-wrap">${esc(v.remediation) || "-"}</p>
+        <div class="row g-2">
+          <div class="col-md-5">
+            <label class="wsa-label">Status</label>
+            <select class="wsa-select" id="vStatus">
+              ${["open", "in_review", "resolved", "false_positive"].map((s) =>
+                `<option value="${s}" ${v.status === s ? "selected" : ""}>${s}</option>`).join("")}
+            </select>
+          </div>
+          <div class="col-md-7">
+            <label class="wsa-label">Notes</label>
+            <textarea class="wsa-textarea" id="vNotes" rows="2">${esc(v.notes)}</textarea>
+          </div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+          <button class="wsa-btn wsa-btn-primary" onclick="saveVuln(${v.id})">Save</button>
+          <a class="wsa-btn wsa-btn-ghost" href="/scans/${v.scan_id}">Open Scan</a>
+        </div>`;
+    } catch (e) {
+      $("vulnDetail").innerHTML = `<div class="wsa-error">${esc(e.message)}</div>`;
+    }
+  };
+
+  window.saveVuln = async function (id) {
+    try {
+      await WSA.api("/api/vulnerabilities/" + id, {
+        method: "PATCH",
+        body: JSON.stringify({ status: $("vStatus").value, notes: $("vNotes").value }),
+      });
+      WSA.toast("Finding updated.", "success");
+      closeModal();
+      loadVulns();
+    } catch (e) { WSA.toast(e.message, "error"); }
+  };
+
+  window.closeModal = function () { $("vulnModal").hidden = true; };
+
+  $("applyBtn").addEventListener("click", loadVulns);
+  $("fSort").addEventListener("change", loadVulns);
+  $("fSeverity").addEventListener("change", loadVulns);
+  let searchTimer;
+  $("fSearch").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(loadVulns, 350); });
+
+  if (params.get("search")) $("fSearch").value = params.get("search");
+
+  WSA.refreshers.push(() => loadVulns());
+  loadTargets();
+  loadVulns();
+})();
+</script>
+{% endblock %}

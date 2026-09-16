@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Start New Security Scan</h4>
+  <p>Configure engines and launch an audit against a target you are authorized to test.</p>
+</section>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-8">
+    <div class="wsa-card">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Scan Configuration</h6></div>
+      <form id="scanForm">
+        <div class="mb-3">
+          <label class="wsa-label" for="target_url">Target URL</label>
+          <input class="wsa-input" id="target_url" name="target_url" placeholder="https://example.com" required>
+          <div class="wsa-hint">Full URL including scheme. Only test systems you own or have written permission to audit.</div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="wsa-label" for="scan_type">Scan Type</label>
+            <select class="wsa-select" id="scan_type" name="scan_type">
+              <option value="quick">Quick</option>
+              <option value="full">Full</option>
+              <option value="custom">Custom</option>
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="wsa-label" for="policy">Scan Policy</label>
+            <select class="wsa-select" id="policy" name="policy">
+              <option value="safe">Safe - passive only, minimal requests</option>
+              <option value="balanced" selected>Balanced - default</option>
+              <option value="aggressive">Aggressive - maximum coverage</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row g-3 mb-3">
+          <div class="col-md-6">
+            <label class="wsa-label" for="auth_username">Authentication (optional)</label>
+            <input class="wsa-input" id="auth_username" name="auth_username" placeholder="Username for basic auth">
+          </div>
+          <div class="col-md-6">
+            <label class="wsa-label" for="auth_password">&nbsp;</label>
+            <input class="wsa-input" type="password" id="auth_password" name="auth_password" placeholder="Password for basic auth">
+          </div>
+        </div>
+
+        <label class="wsa-label">Security Engines</label>
+        <label class="wsa-check">
+          <input type="checkbox" name="playwright_enabled" id="playwright_enabled">
+          <span><b>Playwright crawling</b><small>Headless-browser crawl to discover JavaScript-rendered pages</small></span>
+        </label>
+        <label class="wsa-check">
+          <input type="checkbox" name="zap_enabled" id="zap_enabled">
+          <span><b>OWASP ZAP scanning</b><small>Spider + active scan via the ZAP API (requires ZAP; skipped with a note if unavailable)</small></span>
+        </label>
+        <label class="wsa-check">
+          <input type="checkbox" name="nuclei_enabled" id="nuclei_enabled">
+          <span><b>Nuclei templates</b><small>Template-based checks (requires the nuclei binary)</small></span>
+        </label>
+        <label class="wsa-check">
+          <input type="checkbox" name="sqli_enabled" id="sqli_enabled">
+          <span><b>Time-based SQLi checks</b><small>Response-timing SQL injection heuristics on URL parameters</small></span>
+        </label>
+        <label class="wsa-check">
+          <input type="checkbox" name="ai_assist" id="ai_assist">
+          <span><b>AI-assisted analysis</b><small>LLM summary of findings after the scan (requires AI settings)</small></span>
+        </label>
+
+        <div class="d-flex gap-2 mt-4 flex-wrap">
+          <button type="submit" class="wsa-btn wsa-btn-primary" id="startBtn">
+            <i class="bi bi-play-fill"></i> Start Scan
+          </button>
+          <button type="button" class="wsa-btn wsa-btn-ghost" id="saveTplBtn">
+            <i class="bi bi-save"></i> Save Template
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-4">
+    <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Authorization Required</h6></div>
+      <label class="wsa-check">
+        <input type="checkbox" id="authorized" required>
+        <span><b>I am authorized to audit this target</b>
+        <small>WSA only runs scans against systems you own or have explicit written permission to test.</small></span>
+      </label>
+      <div class="wsa-hint">Scans without this confirmation are rejected by the backend.</div>
+    </div>
+
+    <div class="wsa-card">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Scan Progress</h6>
+        <span id="scanBadge" class="wsa-status pending" hidden>pending</span></div>
+      <div id="progressWrap" hidden>
+        <div class="wsa-progress mb-2"><div class="wsa-progress-bar" id="scanProgressBar" style="width:0%"></div></div>
+        <div class="wsa-cell-muted" id="scanStep">Waiting…</div>
+      </div>
+      <div id="scanEmpty" class="wsa-empty">
+        <i class="bi bi-activity"></i><b>No scan running</b>
+        Launch a scan to see live progress here.
+      </div>
+      <div id="scanDone" hidden></div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  let activeScanId = null;
+
+  // Scan-type presets fill engine checkboxes
+  $("scan_type").addEventListener("change", () => {
+    const t = $("scan_type").value;
+    const set = (k, v) => { $(k).checked = v; };
+    if (t === "quick") { set("playwright_enabled", false); set("zap_enabled", false); set("nuclei_enabled", false); set("sqli_enabled", false); }
+    if (t === "full") { set("playwright_enabled", true); set("zap_enabled", true); set("nuclei_enabled", true); set("sqli_enabled", true); }
+  });
+
+  $("scanForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!$("authorized").checked) {
+      WSA.toast("You must confirm you are authorized to audit this target.", "error");
+      return;
+    }
+    const payload = {
+      target_url: $("target_url").value.trim(),
+      scan_type: $("scan_type").value,
+      policy: $("policy").value,
+      authorized: $("authorized").checked ? "true" : "false",
+      playwright_enabled: $("playwright_enabled").checked,
+      zap_enabled: $("zap_enabled").checked,
+      nuclei_enabled: $("nuclei_enabled").checked,
+      sqli_enabled: $("sqli_enabled").checked,
+      ai_assist: $("ai_assist").checked,
+      auth_enabled: !!$("auth_username").value,
+      auth_username: $("auth_username").value,
+      auth_password: $("auth_password").value,
+    };
+    const btn = $("startBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split wsa-spin"></i> Starting…';
+    try {
+      const d = await WSA.api("/api/scans", { method: "POST", body: JSON.stringify(payload) });
+      activeScanId = d.scan.id;
+      WSA.toast(`Scan #${d.scan.id} queued.`, "success");
+      showProgress(d.scan);
+    } catch (err) {
+      WSA.toast(err.message, "error", 7000);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-play-fill"></i> Start Scan';
+    }
+  });
+
+  $("saveTplBtn").addEventListener("click", async () => {
+    const name = prompt("Template name:");
+    if (!name) return;
+    try {
+      await WSA.api("/api/templates", {
+        method: "POST",
+        body: JSON.stringify({
+          name,
+          scan_type: $("scan_type").value,
+          policy: $("policy").value,
+          playwright_enabled: $("playwright_enabled").checked,
+          zap_enabled: $("zap_enabled").checked,
+          nuclei_enabled: $("nuclei_enabled").checked,
+          sqli_enabled: $("sqli_enabled").checked,
+          ai_assist: $("ai_assist").checked,
+        }),
+      });
+      WSA.toast("Template saved.", "success");
+    } catch (e) { WSA.toast(e.message, "error"); }
+  });
+
+  function showProgress(scan) {
+    $("scanEmpty").hidden = true;
+    $("progressWrap").hidden = false;
+    $("scanBadge").hidden = false;
+    updateProgress(scan);
+  }
+
+  function updateProgress(scan) {
+    if (!scan) return;
+    $("scanBadge").className = "wsa-status " + scan.status;
+    $("scanBadge").textContent = scan.status;
+    $("scanProgressBar").style.width = (scan.progress ?? 0) + "%";
+    $("scanProgressBar").className = "wsa-progress-bar " +
+      (scan.status === "completed" ? "done" : scan.status === "failed" ? "failed" : "");
+    $("scanStep").textContent = scan.current_step || "";
+    if (["completed", "failed", "cancelled"].includes(scan.status)) {
+      $("scanDone").hidden = false;
+      $("scanDone").innerHTML = scan.status === "completed"
+        ? `<div class="wsa-banner-info mt-3">Scan #${scan.id} completed with <b>${scan.findings_count ?? 0}</b> finding(s).
+           <a href="/scans/${scan.id}">View results</a></div>`
+        : `<div class="wsa-error mt-3"><span>${esc(scan.error_message || "Scan " + scan.status)}</span></div>`;
+    }
+  }
+
+  // live progress via socket events
+  WSA.refreshers.push(async (evt) => {
+    if (evt && evt.scan_id && evt.scan_id === activeScanId) {
+      if (evt.progress !== undefined) {
+        updateProgress({ status: evt.status || "running", progress: evt.progress, current_step: evt.step });
+      }
+      if (evt.status && ["completed", "failed", "cancelled"].includes(evt.status)) {
+        const d = await WSA.api("/api/scans/" + evt.scan_id);
+        updateProgress(d.scan);
+      }
+      return;
+    }
+    if (evt && evt.progress !== undefined) return; // unrelated event
+    if (!activeScanId) return;
+    try {
+      const d = await WSA.api("/api/scans/" + activeScanId);
+      updateProgress(d.scan);
+      if (!["pending", "running"].includes(d.scan.status)) activeScanId = null;
+    } catch (_) {}
+  });
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+})();
+</script>
+{% endblock %}

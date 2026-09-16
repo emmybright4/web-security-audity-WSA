@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>Security Reports</h4>
+  <p>Generate professional PDF reports from real scan data - executive summary, severity breakdown, findings and remediation.</p>
+</section>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-5">
+    <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Generate New Report</h6></div>
+      <label class="wsa-label">Scan</label>
+      <select class="wsa-select mb-3" id="scanSelect"><option value="">Loading scans…</option></select>
+      <label class="wsa-label">Report name (optional)</label>
+      <input class="wsa-input mb-3" id="reportName" placeholder="WSA-Report-Q3">
+      <button class="wsa-btn wsa-btn-primary w-100" id="genBtn">
+        <i class="bi bi-file-earmark-pdf"></i> Generate PDF Report
+      </button>
+      <div class="wsa-hint">Reports include only actual findings recorded in the database.</div>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-7">
+    <div class="wsa-card">
+      <div class="wsa-card-head">
+        <h6 class="wsa-section-title">Report History</h6>
+        <button class="btn btn-sm wsa-btn-ghost" onclick="loadReports()"><i class="bi bi-arrow-clockwise"></i></button>
+      </div>
+      <div class="wsa-table-wrap">
+        <table class="wsa-table">
+          <thead><tr><th>Report</th><th>Scan</th><th>Generated</th><th class="text-end">Actions</th></tr></thead>
+          <tbody id="reportsBody">
+            <tr><td colspan="4" class="wsa-empty"><i class="bi bi-hourglass-split"></i>Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+
+  async function loadScans() {
+    try {
+      const d = await WSA.api("/api/scans?limit=100");
+      const completed = d.scans.filter((s) => s.status === "completed");
+      $("scanSelect").innerHTML = completed.length
+        ? completed.map((s) => `<option value="${s.id}">Scan #${s.id} - ${esc(WSA.truncate(s.target_url, 52))} (${s.findings_count} findings)</option>`).join("")
+        : '<option value="">No completed scans yet - run a scan first</option>';
+    } catch (e) {
+      $("scanSelect").innerHTML = '<option value="">Failed to load scans</option>';
+    }
+  }
+
+  async function loadReports() {
+    const body = $("reportsBody");
+    try {
+      const d = await WSA.api("/api/reports");
+      if (!d.reports.length) {
+        body.innerHTML = `<tr><td colspan="4" class="wsa-empty"><i class="bi bi-file-earmark-pdf"></i>
+          <b>No reports generated yet.</b> Generate your first report from a completed scan.</td></tr>`;
+        return;
+      }
+      body.innerHTML = d.reports.map((r) => `
+        <tr>
+          <td><div class="wsa-cell-strong">${esc(r.report_name)}</div></td>
+          <td class="wsa-cell-muted">Scan #${r.scan_id ?? "-"}</td>
+          <td class="wsa-cell-muted">${WSA.ago(r.generated_at)}</td>
+          <td class="text-end">
+            <a class="btn btn-sm wsa-btn-ghost" href="/api/reports/${r.id}/view" target="_blank"><i class="bi bi-eye"></i></a>
+            <a class="btn btn-sm wsa-btn-ghost" href="/api/reports/${r.id}/download"><i class="bi bi-download"></i></a>
+            <button class="btn btn-sm wsa-btn-danger" onclick="delReport(${r.id})"><i class="bi bi-trash"></i></button>
+          </td>
+        </tr>`).join("");
+    } catch (e) {
+      body.innerHTML = `<tr><td colspan="4"><div class="wsa-error">${esc(e.message)}</div></td></tr>`;
+    }
+  }
+
+  $("genBtn").addEventListener("click", async () => {
+    if (!$("scanSelect").value) { WSA.toast("Select a completed scan first.", "warn"); return; }
+    const btn = $("genBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<i class="bi bi-hourglass-split wsa-spin"></i> Generating…';
+    try {
+      const d = await WSA.api("/api/reports/generate", {
+        method: "POST",
+        body: JSON.stringify({ scan_id: parseInt($("scanSelect").value), report_name: $("reportName").value }),
+      });
+      WSA.toast("Report generated.", "success");
+      window.open(`/api/reports/${d.report.id}/view`, "_blank");
+      loadReports();
+    } catch (e) {
+      WSA.toast(e.message, "error", 7000);
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-file-earmark-pdf"></i> Generate PDF Report';
+    }
+  });
+
+  window.delReport = async function (id) {
+    if (!confirm("Delete this report?")) return;
+    try {
+      await WSA.api("/api/reports/" + id, { method: "DELETE" });
+      WSA.toast("Report deleted.", "success");
+      loadReports();
+    } catch (e) { WSA.toast(e.message, "error"); }
+  };
+
+  WSA.refreshers.push(() => loadReports());
+  loadScans();
+  loadReports();
+})();
+</script>
+{% endblock %}

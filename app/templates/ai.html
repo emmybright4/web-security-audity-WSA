@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="wsa-welcome mb-4">
+  <h4>WSA AI Assistant</h4>
+  <p>Intelligent Security Analysis</p>
+</section>
+
+<div class="row g-3">
+  <div class="col-12 col-xl-8">
+    <div class="wsa-card d-flex flex-column" style="min-height:540px">
+      <div class="wsa-card-head">
+        <div>
+          <h6 class="wsa-section-title">Security Chat</h6>
+          <span class="wsa-section-sub">Ask about your real scan results</span>
+        </div>
+        <span class="wsa-pill" id="aiStatus">Checking…</span>
+      </div>
+      <div id="chatBox" class="wsa-chat-box flex-grow-1"></div>
+      <form id="chatForm" class="d-flex gap-2 mt-3">
+        <input class="wsa-input" id="chatInput" placeholder="e.g. Summarize the latest scan and the most urgent fixes" autocomplete="off">
+        <button class="wsa-btn wsa-btn-primary" id="chatSend"><i class="bi bi-send"></i></button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-12 col-xl-4">
+    <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Quick Actions</h6></div>
+      <div class="d-grid gap-2">
+        <button class="wsa-btn wsa-btn-ghost text-start" onclick="quick('Analyze latest scan')">
+          <i class="bi bi-search"></i> Analyze latest scan
+        </button>
+        <button class="wsa-btn wsa-btn-ghost text-start" onclick="quick('Summarize all findings by severity')">
+          <i class="bi bi-list-check"></i> Summarize findings
+        </button>
+        <button class="wsa-btn wsa-btn-ghost text-start" onclick="quick('Suggest fixes for the highest severity findings')">
+          <i class="bi bi-wrench"></i> Suggest fixes
+        </button>
+        <a class="wsa-btn wsa-btn-ghost text-start" href="/reports">
+          <i class="bi bi-file-earmark-pdf"></i> Generate report
+        </a>
+      </div>
+    </div>
+    <div class="wsa-card">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">How it works</h6></div>
+      <div class="wsa-cell-muted" style="font-size:13px">
+        The assistant retrieves <b>actual findings</b> from the WSA database and sends them to your
+        configured LLM provider for analysis. If AI is not configured, WSA never invents results -
+        you'll see a clear setup message instead.
+        <div class="wsa-banner-info mt-3">
+          Configure <b>AI_PROVIDER</b> and <b>AI_API_KEY</b> in <span class="wsa-mono">.env</span> to enable AI.
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<style>
+.wsa-chat-box { overflow-y: auto; max-height: 430px; padding: 6px 2px; }
+.wsa-msg { max-width: 84%; padding: 12px 16px; border-radius: 14px; font-size: 13.5px; margin-bottom: 10px; white-space: pre-wrap; }
+.wsa-msg.user { background: var(--wsa-blue-soft); margin-left: auto; color: var(--wsa-navy); }
+.wsa-msg.bot { background: #f1f5fb; border: 1px solid var(--wsa-border); }
+</style>
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const box = $("chatBox");
+
+  function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+  function addMsg(cls, text) {
+    const el = document.createElement("div");
+    el.className = "wsa-msg " + cls;
+    el.textContent = text;
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    return el;
+  }
+
+  async function checkStatus() {
+    try {
+      const d = await WSA.api("/api/ai/status");
+      $("aiStatus").textContent = d.configured ? "AI connected" : "Not configured";
+      if (!d.configured) {
+        addMsg("bot", "AI integration is not configured. Add your LLM provider settings to enable AI analysis.\n\nSet AI_PROVIDER and AI_API_KEY in your .env file, then restart WSA.");
+      } else {
+        addMsg("bot", "Hello Emmy! I'm the WSA AI Assistant. I can analyze your latest scan, explain vulnerabilities, summarize findings and suggest fixes - all based on your real scan results.");
+      }
+    } catch (e) {
+      $("aiStatus").textContent = "Error";
+    }
+  }
+
+  async function ask(question) {
+    addMsg("user", question);
+    const thinking = addMsg("bot", "Analyzing real findings…");
+    try {
+      const d = await WSA.api("/api/ai/analyze", {
+        method: "POST",
+        body: JSON.stringify({ question }),
+      });
+      thinking.textContent = d.answer || "(empty response)";
+    } catch (e) {
+      thinking.innerHTML = "";
+      addMsg("bot", e.message);
+    }
+  }
+
+  window.quick = (q) => ask(q);
+
+  $("chatForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const q = $("chatInput").value.trim();
+    if (!q) return;
+    $("chatInput").value = "";
+    ask(q);
+  });
+
+  checkStatus();
+})();
+</script>
+{% endblock %}
