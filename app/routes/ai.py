@@ -3,6 +3,7 @@ from flask import Blueprint, current_app, jsonify, request
 
 from ..models import Scan, Vulnerability
 from ..services.engines import ai_service
+from ._api_guard import api_login_required
 
 bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
@@ -12,12 +13,14 @@ def _config():
 
 
 @bp.get("/status")
+@api_login_required
 def status():
     ok, detail = ai_service.availability(_config())
     return jsonify(configured=ok, detail=detail)
 
 
 @bp.post("/analyze")
+@api_login_required
 def analyze():
     ok, detail = ai_service.availability(_config())
     if not ok:

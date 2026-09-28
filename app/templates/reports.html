@@ -18,6 +18,26 @@
       </button>
       <div class="wsa-hint">Reports include only actual findings recorded in the database.</div>
     </div>
+
+    <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">Email Report</h6></div>
+      <div class="wsa-hint">
+        Only <b>verified</b> addresses can receive report contents: your primary verified
+        email plus any security recipients confirmed in Settings.
+      </div>
+      <div class="mt-2" id="recipientList">
+        <div class="wsa-cell-muted" style="font-size:13px">Loading recipients…</div>
+      </div>
+      <label class="wsa-label mt-2">Format</label>
+      <select class="wsa-select" id="emailFormat">
+        <option value="pdf">PDF</option>
+        <option value="html">HTML</option>
+      </select>
+      <button class="wsa-btn wsa-btn-ghost w-100 mt-2" id="emailBtn">
+        <i class="bi bi-envelope-arrow-up"></i> Email Report
+      </button>
+      <div class="wsa-hint mt-2" id="emailHint" hidden></div>
+    </div>
   </div>
 
   <div class="col-12 col-xl-7">

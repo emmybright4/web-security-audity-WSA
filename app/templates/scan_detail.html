@@ -16,12 +16,13 @@
 <div class="row g-3 mb-3">
   <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Status</div><div id="scanStatus" class="mt-2">—</div></div></div>
   <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Progress</div><div class="wsa-progress mt-2"><div class="wsa-progress-bar" id="scanProgress" style="width:0%"></div></div></div></div>
-  <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Findings</div><div class="wsa-stat-value mt-1" id="scanFindings">0</div></div></div>
+  <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Findings</div><div class="wsa-stat-value mt-1" id="scanFindings">0</div><div class="d-flex flex-wrap gap-1 mt-2" id="sevBreakdown"></div></div></div>
   <div class="col-md-3"><div class="wsa-card"><div class="wsa-stat-label">Duration</div><div class="wsa-stat-value mt-1" style="font-size:20px" id="scanDuration">—</div></div></div>
 </div>
 
 <div class="wsa-card mb-3" id="stepCard" hidden>
   <div class="wsa-cell-muted"><i class="bi bi-activity"></i> <span id="scanStep">—</span></div>
+  <div class="wsa-cell-muted mt-2" id="scanNotes" hidden></div>
 </div>
 
 <div class="wsa-card mb-3" id="errCard" hidden>
@@ -76,7 +77,29 @@
     $("stepCard").hidden = !s.current_step;
     const active = ["pending", "running"].includes(s.status);
     $("cancelBtn").hidden = !active;
-    if (s.error_message) { $("errCard").hidden = false; $("scanError").textContent = s.error_message; }
+
+    // Severity breakdown of this scan's findings (high / medium / low / info).
+    const sevCounts = [
+      ["high", s.high || 0], ["medium", s.medium || 0],
+      ["low", s.low || 0], ["informational", s.informational || 0],
+    ];
+    $("sevBreakdown").innerHTML = d.vulnerabilities.length
+      ? sevCounts.filter(([, n]) => n > 0).map(([k, n]) =>
+          `<span class="wsa-sev ${k}">${n} ${k === "informational" ? "info" : k}</span>`).join("")
+      : "";
+
+    // `error_message` also carries engine skip notices (e.g. "nuclei not
+    // installed") and the backfill bookkeeping marker -- only a scan that
+    // actually failed has an error worth showing in red.
+    let notes = (s.error_message || "").trim();
+    if (notes.toLowerCase() === "backfilled") notes = "";
+    const failed = ["failed", "cancelled"].includes(s.status);
+    $("errCard").hidden = !(failed && notes);
+    if (failed && notes) $("scanError").textContent = notes;
+    $("scanNotes").hidden = !(!failed && notes);
+    if (!failed && notes) {
+      $("scanNotes").innerHTML = '<i class="bi bi-info-circle"></i> ' + esc(notes);
+    }
 
     const body = $("findingsBody");
     if (!d.vulnerabilities.length) {

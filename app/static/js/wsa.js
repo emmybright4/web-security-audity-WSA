@@ -32,6 +32,11 @@
   };
 
   WSA.toast = function toast(msg, type = "", ms = 4200) {
+    // Confirmations and status updates no longer pop up: a single scan used to
+    // stack "queued / started / completed" boxes on screen. Everything is still
+    // recorded in the notification bell. Warnings and errors do pop up, so a
+    // rejected action (e.g. missing authorisation) still gives visible feedback.
+    if (type !== "error" && type !== "warn") return;
     const box = document.getElementById("wsaToasts");
     if (!box) return;
     const el = document.createElement("div");
@@ -87,6 +92,7 @@
   // ---------- api ----------
   WSA.api = async function api(url, opts = {}) {
     const resp = await fetch(url, {
+      credentials: "include",
       headers: { "Content-Type": "application/json" },
       ...opts,
     });
@@ -132,8 +138,9 @@
       });
       sock.on("new_finding", (d) => {
         const sev = (d.severity || "informational").toUpperCase();
+        // Findings surface in the Findings list (and the bell); they are not
+        // pushed as popups -- a scan produces too many to stack on screen.
         WSA.notify("New Finding Discovered", `[${sev}] ${d.name}`);
-        WSA.toast(`New ${sev} finding: ${WSA.truncate(d.name, 42)}`, sev === "HIGH" ? "error" : "warn");
         WSA.refreshNow();
       });
       sock.on("scan_completed", (d) => {
@@ -150,6 +157,24 @@
     } catch (e) {
       startPolling("socket init failed");
     }
+  }
+
+  // ---------- user dropdown / sign out ----------
+  function initUserMenu() {
+    const menu = document.getElementById("wsaUserMenu");
+    const drop = document.getElementById("wsaUserDropdown");
+    const signOut = document.getElementById("wsaSignOut");
+    menu?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      drop.hidden = !drop.hidden;
+    });
+    document.addEventListener("click", (e) => {
+      if (drop && !drop.hidden && !drop.contains(e.target)) drop.hidden = true;
+    });
+    signOut?.addEventListener("click", async () => {
+      try { await WSA.api("/api/auth/logout", { method: "POST" }); } catch (_) {}
+      location.href = "/login";
+    });
   }
 
   // ---------- collapsible sidebar ----------
@@ -204,9 +229,19 @@
 
   document.addEventListener("DOMContentLoaded", () => {
     initChrome();
+    initUserMenu();
     initSidebar();
     connectSocket();
     WSA.refreshNow();
+
+    // The socket only fires while a web scan is running (IP-scan events are not
+    // relayed to these refreshers), so an idle page would keep showing whatever
+    // it had on screen when it loaded. Refresh on a slow timer, and immediately
+    // when the tab comes back into view, so the numbers always match the DB.
+    setInterval(() => WSA.refreshNow(), 30000);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) WSA.refreshNow();
+    });
   });
 
   window.WSA = WSA;

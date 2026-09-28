@@ -28,6 +28,53 @@ def _add_finding(findings, **kw):
     findings.append(kw)
 
 
+# Content that can only come from the file a probe is looking for. A generic
+# HTML "page not found" body matches none of these, so a soft-404 no longer
+# produces a high-severity finding.
+_FILE_SIGNATURES = {
+    ".git/HEAD": ("ref:",),
+    ".env": ("app_key", "db_host", "database_url", "secret_key", "api_key",
+             "password", "db_password"),
+    "backup.sql": ("create table", "insert into", "mysqldump", "drop table",
+                   "alter table"),
+    "phpinfo.php": ("phpinfo()", "php version"),
+}
+
+
+def _file_signature(path, text):
+    """Return a short evidence quote when the body really is that file.
+
+    Returns ``None`` when the signature is absent, so the caller records
+    nothing rather than guessing.
+    """
+    needles = _FILE_SIGNATURES.get(path)
+    if not needles:
+        return None
+    head = (text or "")[:4000]
+    low = head.lower()
+
+    if path == ".env":
+        # Key=value lines, and not an HTML page that merely mentions "password".
+        if "<html" in low[:200] or "<!doctype" in low[:200]:
+            return None
+        for line in head.splitlines()[:60]:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            key = stripped.split("=", 1)[0].strip().lower() if "=" in stripped else ""
+            if key and any(n in key for n in needles):
+                # Never quote a value: it would be a real secret in the report.
+                return f"{path} is served publicly (found key '{key.split()[0]}'; value withheld)."
+        return None
+
+    for needle in needles:
+        if needle in low:
+            index = low.index(needle)
+            quote = " ".join(head[max(0, index - 40):index + 60].split())[:120]
+            return f"{path} is served publicly (content matched '{needle}': \"{quote}\")."
+    return None
+
+
 def _tls_certificate_check(session, hostname, port, findings, target):
     """Certificate inspection: expiry, self-signed, hostname mismatch."""
     ctx = ssl.create_default_context()
@@ -181,7 +228,98 @@ def scan(target, options, progress_cb=None):
                          remediation=rem, url=final_url)
     tick(35, "Security header audit complete")
 
-    # 4) Server disclosure -----------------------------------------------------
+    # 4) Man-in-the-Middle (MITM) checks ------------------------------------------
+    progress_cb and progress_cb(38, "Checking for Man-in-the-Middle vulnerabilities")
+
+    # 4a) HTTP-to-HTTPS redirect check
+    if not use_https:
+        try:
+            r = session.get(target, timeout=6, allow_redirects=False)
+            summary["requests_made"] += 1
+            if r.status_code in (301, 302, 307, 308):
+                location = r.headers.get("Location", "")
+                if location.lower().startswith("https://"):
+                    _add_finding(findings, name="HTTPS Redirect Available but Not Enforced",
+                                 severity="medium", confidence="firm",
+                                 description="The site redirects HTTP to HTTPS when manually accessed, but "
+                                             "does not enforce HSTS. Users typing http:// or clicking old links "
+                                             "are vulnerable to SSL stripping / downgrade attacks.",
+                                 evidence=f"HTTP -> HTTPS redirect: {r.status_code} to {location}",
+                                 remediation="Enable HSTS with a long max-age and add the site to the "
+                                             "HSTS preload list.",
+                                 url=target)
+                else:
+                    _add_finding(findings, name="No HTTPS Redirect - Plain HTTP Accepted",
+                                 severity="high", confidence="firm",
+                                 description="The site does not redirect to HTTPS. All traffic is transmitted "
+                                             "in plain text and vulnerable to interception.",
+                                 evidence=f"HTTP response {r.status_code} without HTTPS redirect.",
+                                 remediation="Configure the web server to redirect all HTTP traffic to HTTPS.",
+                                 url=target)
+            else:
+                # No redirect at all — server responds directly over HTTP
+                _add_finding(findings, name="No HTTPS Enforcement",
+                             severity="high", confidence="firm",
+                             description="The site accepts plain HTTP connections without redirecting to "
+                                         "HTTPS. All data (including credentials) is transmitted in cleartext.",
+                             evidence=f"HTTP response {r.status_code} with no redirect to HTTPS.",
+                             remediation="Configure HTTPS and redirect all HTTP traffic.",
+                             url=target)
+        except requests.RequestException:
+            pass
+
+    # 4b) Mixed content detection
+    if use_https and html:
+        import re as _re_mc
+        http_resources = _re_mc.findall(
+            r'(?:src|href|action|poster)\s*=\s*["\']http://[^"\']+["\']', html, _re_mc.IGNORECASE)
+        if http_resources:
+            _add_finding(findings, name="Mixed Content Detected (HTTP Resources on HTTPS Page)",
+                         severity="medium", confidence="firm",
+                         description="The HTTPS page loads resources over plain HTTP, allowing an attacker "
+                                     "to intercept or modify content in transit (MITM).",
+                         evidence=f"Found {len(http_resources)} HTTP resource(s): {http_resources[:3]}",
+                         remediation="Update all resource URLs to use HTTPS.",
+                         url=final_url)
+
+    # 4c) Insecure transport - password over HTTP
+    if not use_https and html:
+        import re as _re_http
+        if _re_http.search(r'type\s*=\s*["\']?password', html, _re_http.IGNORECASE):
+            _add_finding(findings, name="Insecure Transport - Password Field over HTTP",
+                         severity="high", confidence="certain",
+                         description="A password input field exists on a page served over plain HTTP. "
+                                     "Credentials can be intercepted via Man-in-the-Middle attacks.",
+                         evidence="Password field found on HTTP page.",
+                         remediation="Serve all authentication pages over HTTPS; implement HSTS.",
+                         url=final_url)
+
+    # 4d) Weak cipher / protocol downgrade check
+    if use_https:
+        try:
+            ctx_weak = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            ctx_weak.check_hostname = False
+            ctx_weak.verify_mode = ssl.CERT_NONE
+            ctx_weak.set_ciphers('ALL:@SECLEVEL=0')
+            with socket.create_connection((hostname, port), timeout=6) as sock:
+                with ctx_weak.wrap_socket(sock, server_hostname=hostname) as tls:
+                    proto = tls.version()
+                    cipher = tls.cipher()
+                    if proto and ('TLSv1.0' in proto or 'TLSv1.1' in proto or 'SSLv3' in proto):
+                        _add_finding(findings,
+                                     name="Deprecated TLS Protocol Supported (MITM Risk)",
+                                     severity="high", confidence="certain",
+                                     description=f"The server accepts {proto}, which has known vulnerabilities "
+                                                 "and is susceptible to downgrade/BEAST/POODLE attacks.",
+                                     evidence=f"Negotiated: {proto}, cipher: {cipher[0] if cipher else 'N/A'}",
+                                     remediation="Disable TLSv1.0, TLSv1.1, and SSLv3; enforce TLS 1.2+.",
+                                     url=target)
+        except Exception:
+            pass
+
+    tick(44, "MITM checks complete")
+
+    # 5) Server disclosure --------------------------------------------------------
     server = headers.get("Server", "")
     powered = headers.get("X-Powered-By", "")
     if server and any(ch.isdigit() for ch in server):
@@ -198,7 +336,7 @@ def scan(target, options, progress_cb=None):
                      evidence=f"X-Powered-By: {powered}",
                      remediation="Remove the X-Powered-By header.", url=final_url)
 
-    # 5) Cookie flags ------------------------------------------------------------
+    # 6) Cookie flags ------------------------------------------------------------
     if resp.cookies is not None:
         for cookie in resp.cookies:
             flags = []
@@ -216,7 +354,7 @@ def scan(target, options, progress_cb=None):
                              remediation="Set Secure; HttpOnly; SameSite attributes on all cookies.",
                              url=final_url)
 
-    # 6) Insecure form detection ---------------------------------------------------
+    # 7) Insecure form detection ---------------------------------------------------
     import re as _re
     forms = _re.findall(r"<form\b[^>]*>.*?</form>", html, _re.IGNORECASE | _re.DOTALL)
     progress_cb and progress_cb(45, "Analyzing page content and forms")
@@ -249,7 +387,7 @@ def scan(target, options, progress_cb=None):
                          url=form_url)
     summary["pages_crawled"] += 1
 
-    # 7) Information leakage in page source ------------------------------------------
+    # 8) Information leakage in page source ------------------------------------------
     if _re.search(r"(?i)stack\s*trace|Traceback \(most recent call last\)|at [\w$.]+\([\w.]+:\d+\)",
                   html):
         _add_finding(findings, name="Stack Trace Disclosed in Response", severity="medium",
@@ -275,7 +413,7 @@ def scan(target, options, progress_cb=None):
                      remediation="Remove secrets from client code; keep them server-side.",
                      url=final_url)
 
-    # 8) Sensitive path probe ------------------------------------------------------------
+    # 9) Sensitive path probe ------------------------------------------------------------
     progress_cb and progress_cb(58, "Probing common sensitive paths")
     probes = {
         ".git/HEAD": ("Exposed Git Repository", "high",
@@ -317,22 +455,29 @@ def scan(target, options, progress_cb=None):
                              evidence=body.split("\n")[0][:120],
                              remediation="Do not rely on robots.txt to hide sensitive paths; use authentication.",
                              url=urljoin(target + "/", path))
-            elif path == "sitemap.xml" and "<urlset" in body or "<sitemap" in body:
+            elif path == "sitemap.xml" and ("<urlset" in body or "<sitemap" in body):
                 _add_finding(findings, name=name, severity=sev, confidence="certain",
                              description="A sitemap.xml was found; use it to understand the app surface.",
-                             evidence="sitemap.xml returned 200.",
+                             evidence="sitemap.xml returned 200 with sitemap markup.",
                              remediation="Informational only.", url=urljoin(target + "/", path))
             elif path == "admin/" and ("login" in body or "<form" in body or "dashboard" in body):
                 _add_finding(findings, name=name, severity=sev, confidence="firm",
                              description=desc, evidence=f"GET {path} returned 200 with login/dashboard content.",
                              remediation=rem, url=urljoin(target + "/", path))
             elif path in (".git/HEAD", ".env", "backup.sql", "phpinfo.php"):
-                _add_finding(findings, name=name, severity=sev, confidence="firm",
-                             description=desc, evidence=f"GET {path} returned HTTP 200.",
-                             remediation=rem, url=urljoin(target + "/", path))
+                # A bare HTTP 200 proves nothing: single-page apps, CDNs and most
+                # CMS catch-all routes answer 200 with a styled "page not found"
+                # body for every path, which used to make WSA report the same
+                # "exposed .env / .git" high-severity finding on every single
+                # target. Require the actual file signature instead.
+                proof = _file_signature(path, pr.text or "")
+                if proof:
+                    _add_finding(findings, name=name, severity=sev, confidence="certain",
+                                 description=desc, evidence=proof,
+                                 remediation=rem, url=urljoin(target + "/", path))
     tick(66, "Sensitive path probe complete")
 
-    # 9) Light reflection-based XSS probe ------------------------------------------------
+    # 10) Light reflection-based XSS probe -----------------------------------------------
     progress_cb and progress_cb(72, "Running reflection checks")
     xss_payload = "<wsaprobe123>"
     try:
@@ -350,7 +495,7 @@ def scan(target, options, progress_cb=None):
     except requests.RequestException:
         pass
 
-    # 10) Error-based SQLi signature probe ------------------------------------------------
+    # 11) Error-based SQLi signature probe -----------------------------------------------
     progress_cb and progress_cb(80, "Checking SQL error signatures")
     sqli_probe = "1'"
     try:
@@ -379,7 +524,7 @@ def scan(target, options, progress_cb=None):
     except requests.RequestException:
         pass
 
-    # 11) SQLi detail probe when id-like parameter exists ---------------------------------
+    # 12) SQLi detail probe when id-like parameter exists ---------------------------------
     if any(p in (target.split("?", 1)[1] if "?" in target else "") for p in SUSPICIOUS_PARAMS):
         progress_cb and progress_cb(88, "Inspecting injectable-looking parameters")
         _add_finding(findings, name="Input Parameter Requires Manual SQLi Verification", severity="informational",

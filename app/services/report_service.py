@@ -205,6 +205,88 @@ def _share(part, total):
     return round(100 * part / total, 1) if total else "0.0"
 
 
+def render_html_report(scan, vulnerabilities):
+    """HTML twin of :func:`generate_report`, built from the same DB rows."""
+    from datetime import datetime
+    from markupsafe import escape
+
+    order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4, "informational": 4}
+    rows = sorted(vulnerabilities, key=lambda v: order.get(v.severity, 5))
+    counts = {"high": 0, "medium": 0, "low": 0, "informational": 0}
+    for v in rows:
+        if v.severity in ("high", "critical"):
+            counts["high"] += 1
+        elif v.severity == "medium":
+            counts["medium"] += 1
+        elif v.severity == "low":
+            counts["low"] += 1
+        else:
+            counts["informational"] += 1
+
+    facts = [("Target", scan.target_url), ("Scan ID", f"#{scan.id}"),
+             ("Scan type", scan.scan_type), ("Status", scan.status),
+             ("Started", scan.started_at.strftime("%Y-%m-%d %H:%M UTC") if scan.started_at else "-"),
+             ("Completed", scan.completed_at.strftime("%Y-%m-%d %H:%M UTC") if scan.completed_at else "-"),
+             ("Generated", datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"))]
+    fact_html = "".join(
+        f'<tr><th style="text-align:left;padding:6px 14px 6px 0;color:#64748b;'
+        f'font-weight:600">{escape(str(k))}</th>'
+        f'<td style="padding:6px 0">{escape(str(v))}</td></tr>' for k, v in facts)
+
+    if rows:
+        finding_html = "".join(
+            f'<tr>'
+            f'<td style="padding:6px 8px;border-top:1px solid #e2e8f0">{i}</td>'
+            f'<td style="padding:6px 8px;border-top:1px solid #e2e8f0">'
+            f'<span style="font-weight:700;color:'
+            f'{SEV_COLORS.get(v.severity, SEV_COLORS["informational"]).hexval()[2:]}">'
+            f'{escape((v.severity or "").upper())}</span></td>'
+            f'<td style="padding:6px 8px;border-top:1px solid #e2e8f0">'
+            f'{escape(v.name or "")}</td>'
+            f'<td style="padding:6px 8px;border-top:1px solid #e2e8f0">'
+            f'{escape(v.url or v.target_url or "")}</td>'
+            f'<td style="padding:6px 8px;border-top:1px solid #e2e8f0">'
+            f'{escape(v.detected_by or "")}</td>'
+            f'<td style="padding:6px 8px;border-top:1px solid #e2e8f0">'
+            f'{escape(v.remediation or "")}</td></tr>'
+            for i, v in enumerate(rows, start=1))
+    else:
+        finding_html = ('<tr><td colspan="6" style="padding:12px 8px;color:#64748b">'
+                        'No vulnerabilities were recorded for this scan.</td></tr>')
+
+    return f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>WSA security report - scan #{scan.id}</title></head>
+<body style="margin:0;padding:28px;background:#f1f5f9;font-family:Segoe UI,Roboto,Arial,sans-serif;color:#0f172a">
+<div style="max-width:900px;margin:0 auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:26px">
+  <h1 style="margin:0;font-size:22px;color:#0f2a5c">WSA &mdash; Web Security Auditing</h1>
+  <p style="margin:4px 0 18px;color:#1a56db;font-weight:600">Discover. Analyze. Secure.</p>
+  <h2 style="font-size:17px;margin:22px 0 6px">Scan details</h2>
+  <table style="width:100%;font-size:13px;border-collapse:collapse">{fact_html}</table>
+  <h2 style="font-size:17px;margin:22px 0 6px">Severity breakdown</h2>
+  <p style="margin:0;font-size:13px;color:#334155">
+    High/Critical: {counts['high']} &middot; Medium: {counts['medium']} &middot;
+    Low: {counts['low']} &middot; Informational: {counts['informational']} &middot;
+    Total: {len(rows)}
+  </p>
+  <h2 style="font-size:17px;margin:22px 0 6px">Findings</h2>
+  <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+    <thead><tr style="background:#0f2a5c;color:#fff">
+      <th style="padding:7px 8px;text-align:left">#</th>
+      <th style="padding:7px 8px;text-align:left">Severity</th>
+      <th style="padding:7px 8px;text-align:left">Finding</th>
+      <th style="padding:7px 8px;text-align:left">Endpoint</th>
+      <th style="padding:7px 8px;text-align:left">Detected by</th>
+      <th style="padding:7px 8px;text-align:left">Remediation</th>
+    </tr></thead>
+    <tbody>{finding_html}</tbody>
+  </table>
+  <p style="margin:22px 0 0;font-size:12px;color:#64748b">
+    Generated automatically by WSA from real scan data, for the authorised owner of the
+    audited target.</p>
+</div></body></html>"""
+
+
 def _recommendations(vulns):
     seen, out = set(), []
     for v in vulns:

@@ -38,15 +38,41 @@
 
   <div class="col-12 col-xl-6">
     <div class="wsa-card mb-3">
+      <div class="wsa-card-head"><h6 class="wsa-section-title">OWASP ZAP</h6></div>
+      <div class="wsa-cell-muted" style="font-size:13px">
+        Connect WSA to a running ZAP instance (daemon or GUI). Values saved here take effect
+        immediately and override your <span class="wsa-mono">.env</span> — no restart needed.
+      </div>
+      <form id="zapForm" class="mt-3">
+        <div class="mb-3">
+          <label class="wsa-label" for="sZapUrl">ZAP API URL</label>
+          <input class="wsa-input wsa-mono" type="text" id="sZapUrl" placeholder="http://127.0.0.1:8080">
+        </div>
+        <div class="mb-3">
+          <label class="wsa-label" for="sZapKey">API key</label>
+          <div class="input-group">
+            <input class="wsa-input wsa-mono" type="password" id="sZapKey" placeholder="Leave empty to keep current key" autocomplete="new-password">
+            <button class="btn btn-outline-secondary" type="button" id="sZapKeyToggle" title="Show / hide"><i class="bi bi-eye"></i></button>
+          </div>
+          <div class="wsa-hint" id="sZapKeyHint" hidden></div>
+        </div>
+        <div class="d-flex gap-2 mt-2">
+          <button class="wsa-btn wsa-btn-primary" type="submit"><i class="bi bi-check-lg"></i> Save</button>
+          <button class="wsa-btn wsa-btn-ghost" type="button" id="zapTestBtn"><i class="bi bi-broadcast"></i> Test connection</button>
+        </div>
+        <div class="wsa-hint mt-2" id="zapTestResult" hidden></div>
+      </form>
+    </div>
+
+    <div class="wsa-card mb-3">
       <div class="wsa-card-head"><h6 class="wsa-section-title">Engine Configuration</h6></div>
       <div class="wsa-cell-muted" style="font-size:13px">
-        Set these variables in your <span class="wsa-mono">.env</span> file, then restart WSA.
+        ZAP is configured above. Set the remaining variables in your <span class="wsa-mono">.env</span> file, then restart WSA.
         Tools without configuration show <b>Not configured</b> on the Tools page — never a fake status.
       </div>
       <table class="wsa-table mt-3">
         <thead><tr><th>Tool</th><th>Environment variables</th></tr></thead>
         <tbody>
-          <tr><td class="wsa-cell-strong">OWASP ZAP</td><td class="wsa-mono">ZAP_API_URL, ZAP_API_KEY</td></tr>
           <tr><td class="wsa-cell-strong">ZAP-MCP</td><td class="wsa-mono">ZAP_MCP_URL</td></tr>
           <tr><td class="wsa-cell-strong">Nuclei</td><td class="wsa-mono">NUCLEI_BIN</td></tr>
           <tr><td class="wsa-cell-strong">gosqli</td><td class="wsa-mono">GOSQLI_BIN</td></tr>
@@ -56,6 +82,89 @@
       <a class="wsa-btn wsa-btn-ghost mt-3" href="/tools"><i class="bi bi-plug"></i> Check tool status</a>
     </div>
   </div>
+</div>
+
+<!-- ============================== NOTIFICATIONS ============================== -->
+<div class="wsa-card mb-3">
+  <div class="wsa-card-head"><h6 class="wsa-section-title">Notifications — Email &amp; SMS</h6></div>
+  <div class="wsa-cell-muted" style="font-size:13px">
+    Only <b>verified</b> email addresses and phone numbers receive messages. Verification and
+    password-reset codes are always sent, whatever these switches say.
+  </div>
+
+  <div id="notifStatus" class="wsa-hint mt-2" hidden></div>
+
+  <div class="row g-3 mt-1">
+    <div class="col-12 col-lg-6">
+      <h6 class="wsa-section-title" style="font-size:13px"><i class="bi bi-envelope"></i> Email</h6>
+      <div id="emailEvents" class="mt-2"></div>
+    </div>
+    <div class="col-12 col-lg-6">
+      <h6 class="wsa-section-title" style="font-size:13px"><i class="bi bi-phone"></i> SMS</h6>
+      <div id="smsEvents" class="mt-2"></div>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 mt-3">
+    <button class="wsa-btn wsa-btn-primary" type="button" id="saveNotifs">
+      <i class="bi bi-check-lg"></i> Save notification preferences
+    </button>
+    <button class="wsa-btn wsa-btn-ghost" type="button" id="reloadNotifs">
+      <i class="bi bi-arrow-repeat"></i> Reload
+    </button>
+  </div>
+  <div class="wsa-hint mt-2" id="notifHint" hidden></div>
+</div>
+
+<!-- ============================== RECIPIENTS ============================== -->
+<div class="wsa-card mb-3">
+  <div class="wsa-card-head"><h6 class="wsa-section-title">Security Recipients</h6></div>
+  <div class="wsa-cell-muted" style="font-size:13px">
+    Authorised colleagues who may receive security reports. An address only becomes
+    deliverable after it proves control of the inbox with a 6-digit code.
+  </div>
+
+  <table class="wsa-table mt-3">
+    <thead><tr><th>Email</th><th>Role</th><th>Status</th><th>Actions</th></tr></thead>
+    <tbody id="recipientRows">
+      <tr><td colspan="4" class="wsa-cell-muted">Loading...</td></tr>
+    </tbody>
+  </table>
+
+  <form id="recipientForm" class="mt-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-12 col-md-5">
+        <label class="wsa-label" for="rcptEmail">Email address</label>
+        <input class="wsa-input" type="email" id="rcptEmail" placeholder="security@example.com">
+      </div>
+      <div class="col-12 col-md-4">
+        <label class="wsa-label" for="rcptLabel">Role / label</label>
+        <input class="wsa-input" type="text" id="rcptLabel" placeholder="SOC Team">
+      </div>
+      <div class="col-12 col-md-3">
+        <button class="wsa-btn wsa-btn-primary w-100" type="submit">
+          <i class="bi bi-plus-lg"></i> Add Recipient
+        </button>
+      </div>
+    </div>
+    <div class="wsa-hint mt-2" id="rcptHint" hidden></div>
+  </form>
+</div>
+
+<!-- ============================== HISTORY ============================== -->
+<div class="wsa-card mb-3">
+  <div class="wsa-card-head"><h6 class="wsa-section-title">Communication Logs</h6></div>
+  <ul class="nav nav-pills wsa-subnav mb-3" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-log="email" type="button">Email History</button></li>
+    <li class="nav-item"><button class="nav-link" data-log="sms" type="button">SMS History</button></li>
+  </ul>
+  <div id="logPanel">
+    <table class="wsa-table">
+      <thead id="logHead"></thead>
+      <tbody id="logRows"><tr><td class="wsa-cell-muted">Loading...</td></tr></tbody>
+    </table>
+  </div>
+  <div class="wsa-hint mt-2" id="logHint" hidden></div>
 </div>
 {% endblock %}
 
@@ -73,8 +182,48 @@
       $("sPolling").value = s.polling_fallback_seconds ?? 4;
       $("sMaxPages").value = s.max_pages ?? 12;
       $("sNotifs").checked = !!s.notifications_enabled;
+      $("sZapUrl").value = s.zap_api_url || "";
+      if (s.zap_api_key_set) {
+        const hint = $("sZapKeyHint");
+        hint.hidden = false;
+        hint.textContent = "A key is saved (" + (s.zap_api_key_masked || "hidden") + "). Leave the field empty to keep it.";
+      }
     } catch (e) { WSA.toast(e.message, "error"); }
   }
+
+  $("sZapKeyToggle").addEventListener("click", () => {
+    const key = $("sZapKey");
+    key.type = key.type === "password" ? "text" : "password";
+  });
+
+  $("zapForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      const body = { zap_api_url: $("sZapUrl").value.trim() };
+      const key = $("sZapKey").value;
+      if (key.trim()) body.zap_api_key = key;  // empty = keep stored key
+      await WSA.api("/api/settings", { method: "PUT", body: JSON.stringify(body) });
+      WSA.toast("ZAP settings saved.", "success");
+      $("sZapKey").value = "";
+      loadSettings();
+    } catch (err) { WSA.toast(err.message, "error"); }
+  });
+
+  $("zapTestBtn").addEventListener("click", async () => {
+    const out = $("zapTestResult");
+    out.hidden = false;
+    out.textContent = "Testing connection...";
+    try {
+      const body = { zap_api_url: $("sZapUrl").value.trim() };
+      const key = $("sZapKey").value;
+      if (key.trim()) body.zap_api_key = key;
+      const d = await WSA.api("/api/settings/zap/test", { method: "POST", body: JSON.stringify(body) });
+      out.textContent = d.ok
+        ? "Connected — ZAP version " + (d.version || "unknown")
+        : "Failed: " + (d.detail || "unreachable");
+      out.style.color = d.ok ? "var(--wsa-success, green)" : "var(--bs-danger, red)";
+    } catch (err) { out.textContent = "Failed: " + err.message; out.style.color = "red"; }
+  });
 
   $("settingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -94,6 +243,221 @@
   });
 
   loadSettings();
+
+  // ---------------------------------------------------------------
+  // Notification preferences, security recipients, delivery history
+  // Every value here comes from the API; nothing is pre-filled.
+  // ---------------------------------------------------------------
+  function el(tag, cls, html) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (html !== undefined) node.innerHTML = html;
+    return node;
+  }
+
+  function statusPill(status) {
+    const map = { sent: "success", failed: "danger", pending: "warn" };
+    return `<span class="wsa-status ${status}">${status}</span>`;
+  }
+
+  async function loadNotifications() {
+    const status = $("notifStatus");
+    try {
+      const d = await WSA.api("/api/settings/notifications");
+      const prefs = d.preferences || { email: {}, sms: {} };
+      const render = (container, events, on) => {
+        container.innerHTML = "";
+        events.forEach((e) => {
+          const id = "notif_" + e.key;
+          const row = el("div", "form-check form-switch mb-1");
+          row.innerHTML = `<input class="form-check-input" type="checkbox" id="${id}"
+            ${prefs[on][e.key] ? "checked" : ""}>
+            <label class="form-check-label" for="${id}" style="font-size:13.5px">${e.label}</label>`;
+          container.appendChild(row);
+        });
+      };
+      render($("emailEvents"), d.email_events, "email");
+      render($("smsEvents"), d.sms_events, "sms");
+
+      const v = d.verification || {};
+      const bits = [];
+      bits.push("Code expiry: " + (v.expires_minutes ?? 10) + " min");
+      bits.push("Max attempts: " + (v.max_attempts ?? 5));
+      bits.push("Resend cooldown: " + (v.resend_cooldown_seconds ?? 60) + " s");
+      if (d.channels && d.channels.length) {
+        bits.push("Verified: " + d.channels.map((c) => c.destination).join(", "));
+      } else {
+        bits.push("No verified contact on this account yet");
+      }
+      status.hidden = false;
+      status.textContent = bits.join(" · ");
+
+      if (!d.email_configured) {
+        status.textContent += " — email delivery is NOT configured (set MAIL_SERVER in .env); codes cannot be sent yet.";
+      }
+      if (d.sms && !d.sms.configured) {
+        status.textContent += " — SMS provider is NOT configured (set SMS_PROVIDER in .env).";
+      }
+    } catch (e) { WSA.toast(e.message, "error"); }
+  }
+
+  $("saveNotifs").addEventListener("click", async () => {
+    const collect = (container) => {
+      const out = {};
+      container.querySelectorAll("input[type=checkbox]").forEach((c) => {
+        out[c.id.replace("notif_", "")] = c.checked;
+      });
+      return out;
+    };
+    try {
+      await WSA.api("/api/settings/notifications", {
+        method: "PUT",
+        body: JSON.stringify({ email: collect($("emailEvents")), sms: collect($("smsEvents")) }),
+      });
+      WSA.toast("Notification preferences saved.", "success");
+    } catch (e) { WSA.toast(e.message, "error"); }
+  });
+
+  $("reloadNotifs").addEventListener("click", () => { loadNotifications(); loadRecipients(); loadLogs(currentLog); });
+
+  // ---- recipients ----
+  let recipientRows = [];
+  async function loadRecipients() {
+    const body = $("recipientRows");
+    try {
+      const d = await WSA.api("/api/settings/recipients");
+      recipientRows = d.recipients || [];
+      body.innerHTML = "";
+      if (d.primary) {
+        const tr = el("tr");
+        tr.innerHTML = `<td class="wsa-cell-strong">${d.primary.email}</td>
+          <td>Primary verified email</td>
+          <td>${statusPill("sent")} <span class="wsa-cell-muted">verified</span></td>
+          <td class="wsa-cell-muted">—</td>`;
+        body.appendChild(tr);
+      }
+      recipientRows.forEach((r) => body.appendChild(recipientRow(r)));
+      if (!d.primary && !recipientRows.length) {
+        body.innerHTML = '<tr><td colspan="4" class="wsa-cell-muted">No recipients yet.</td></tr>';
+      }
+    } catch (e) { WSA.toast(e.message, "error"); }
+  }
+
+  function recipientRow(r) {
+    const tr = el("tr");
+    tr.innerHTML = `<td class="wsa-cell-strong">${r.email}</td>
+      <td>${r.label || "Security Team"}</td>
+      <td>${r.verified ? '<span class="wsa-status success">verified</span>'
+                        : '<span class="wsa-status running">pending</span>'}</td>
+      <td class="d-flex gap-2"></td>`;
+    const actions = tr.lastElementChild;
+    if (r.verified) {
+      const del = el("button", "wsa-btn wsa-btn-ghost",
+        '<i class="bi bi-trash"></i> Remove');
+      del.type = "button";
+      del.addEventListener("click", async () => {
+        try {
+          await WSA.api("/api/settings/recipients/" + r.id, { method: "DELETE" });
+          WSA.toast("Recipient removed.", "success");
+          loadRecipients();
+        } catch (e) { WSA.toast(e.message, "error"); }
+      });
+      actions.appendChild(del);
+    } else {
+      const code = el("input", "wsa-input wsa-mono", "");
+      code.type = "text";
+      code.placeholder = "6-digit code";
+      code.maxLength = 6;
+      code.style.maxWidth = "130px";
+      const verify = el("button", "wsa-btn wsa-btn-primary", '<i class="bi bi-check-lg"></i> Verify');
+      verify.type = "button";
+      verify.addEventListener("click", async () => {
+        try {
+          const d = await WSA.api("/api/settings/recipients/" + r.id + "/verify", {
+            method: "POST", body: JSON.stringify({ code: code.value.trim() }),
+          });
+          WSA.toast(d.message, "success");
+          loadRecipients();
+        } catch (e) { WSA.toast(e.message, "error"); }
+      });
+      const resend = el("button", "wsa-btn wsa-btn-ghost", '<i class="bi bi-arrow-repeat"></i> Resend');
+      resend.type = "button";
+      resend.addEventListener("click", async () => {
+        try {
+          await WSA.api("/api/settings/recipients/" + r.id + "/resend", { method: "POST" });
+          WSA.toast("A new code was sent.", "success");
+        } catch (e) { WSA.toast(e.message, "error"); }
+      });
+      actions.append(code, verify, resend);
+    }
+    return tr;
+  }
+
+  $("recipientForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const hint = $("rcptHint");
+    hint.hidden = true;
+    try {
+      const d = await WSA.api("/api/settings/recipients", {
+        method: "POST",
+        body: JSON.stringify({ email: $("rcptEmail").value.trim(), label: $("rcptLabel").value.trim() }),
+      });
+      WSA.toast(d.message, "success");
+      $("rcptEmail").value = "";
+      $("rcptLabel").value = "";
+      loadRecipients();
+    } catch (err) {
+      hint.hidden = false;
+      hint.textContent = err.message;
+    }
+  });
+
+  // ---- delivery history ----
+  let currentLog = "email";
+  const LOG_COLUMNS = {
+    email: ["Type", "Recipient", "Subject", "Scan", "Date", "Status"],
+    sms: ["Type", "Phone", "Purpose", "Scan", "Date", "Status"],
+  };
+
+  async function loadLogs(kind) {
+    currentLog = kind;
+    const head = $("logHead");
+    const rows = $("logRows");
+    head.innerHTML = "<tr>" + LOG_COLUMNS[kind].map((c) => `<th>${c}</th>`).join("") + "</tr>";
+    rows.innerHTML = '<tr><td class="wsa-cell-muted" colspan="6">Loading...</td></tr>';
+    try {
+      const d = kind === "email"
+        ? await WSA.api("/api/settings/notifications/email-history")
+        : await WSA.api("/api/settings/notifications/sms-history");
+      const items = kind === "email" ? (d.emails || []) : (d.messages || []);
+      if (!items.length) {
+        rows.innerHTML = `<tr><td class="wsa-cell-muted" colspan="6">No messages yet.</td></tr>`;
+        return;
+      }
+      rows.innerHTML = items.map((r) => kind === "email"
+        ? `<tr><td>${r.email_type}</td><td>${r.recipient}</td><td>${r.subject}</td>
+             <td>${r.related_scan_id ? "#" + r.related_scan_id : "—"}</td>
+             <td>${WSA.ago(r.sent_at || r.created_at)}</td><td>${statusPill(r.status)}</td></tr>`
+        : `<tr><td>${r.sms_type}</td><td>${r.phone_number}</td><td>${r.purpose || "—"}</td>
+             <td>${r.related_scan_id ? "#" + r.related_scan_id : "—"}</td>
+             <td>${WSA.ago(r.sent_at || r.created_at)}</td><td>${statusPill(r.status)}</td></tr>`).join("");
+    } catch (e) {
+      rows.innerHTML = `<tr><td colspan="6" class="text-danger">${e.message}</td></tr>`;
+    }
+  }
+
+  document.querySelectorAll("[data-log]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll("[data-log]").forEach((b) => b.classList.remove("active"));
+      btn.classList.add("active");
+      loadLogs(btn.dataset.log);
+    });
+  });
+
+  loadNotifications();
+  loadRecipients();
+  loadLogs("email");
+  WSA.refreshers.push(() => { loadNotifications(); loadRecipients(); loadLogs(currentLog); });
 })();
 </script>
 {% endblock %}

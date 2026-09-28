@@ -2,12 +2,14 @@
 import logging
 
 from flask import Blueprint, current_app, jsonify, request
+from flask_login import current_user
 from sqlalchemy import desc
 
 from ..extensions import db
 from ..models import Scan, ScanTemplate, Vulnerability
 from ..services import scanner
 from ..utils import is_valid_url, normalize_url
+from ._api_guard import api_login_required
 
 log = logging.getLogger("wsa.scans")
 
@@ -17,6 +19,7 @@ VALID_TYPES = {"quick", "full", "custom"}
 
 
 @bp.get("")
+@api_login_required
 def list_scans():
     try:
         limit = min(int(request.args.get("limit", 50)), 200)
@@ -28,6 +31,7 @@ def list_scans():
 
 
 @bp.post("")
+@api_login_required
 def create_scan():
     data = request.get_json(silent=True) or request.form.to_dict()
     return _create_scan_from_data(data or {})
@@ -83,7 +87,8 @@ def _create_scan_from_data(data):
 
     try:
         scan = Scan(target_url=target, scan_type=scan_type, status="pending", progress=0,
-                    options=options, current_step="Queued")
+                    options=options, current_step="Queued",
+                    user_id=getattr(current_user, "row", None) and current_user.row.id)
         db.session.add(scan)
         db.session.commit()
     except Exception as exc:
@@ -104,6 +109,7 @@ def _create_scan_from_data(data):
 
 
 @bp.get("/<int:scan_id>")
+@api_login_required
 def get_scan(scan_id):
     scan = db.session.get(Scan, scan_id)
     if scan is None:
@@ -114,6 +120,7 @@ def get_scan(scan_id):
 
 
 @bp.post("/<int:scan_id>/cancel")
+@api_login_required
 def cancel_scan(scan_id):
     scan = db.session.get(Scan, scan_id)
     if scan is None:
@@ -125,6 +132,7 @@ def cancel_scan(scan_id):
 
 
 @bp.delete("/<int:scan_id>")
+@api_login_required
 def delete_scan(scan_id):
     scan = db.session.get(Scan, scan_id)
     if scan is None:
@@ -140,6 +148,7 @@ def delete_scan(scan_id):
 
 
 @bp.post("/from-template/<int:template_id>")
+@api_login_required
 def from_template(template_id):
     tpl = db.session.get(ScanTemplate, template_id)
     if tpl is None:
