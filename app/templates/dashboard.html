@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="wsa-welcome mb-4">
-  <h4>Welcome back, Emmy Bright 👋</h4>
+  <h4>Welcome back, {{ user_name or "there" }} 👋</h4>
   <p>Your web security auditing platform. Scan, analyze, and secure with intelligent security auditing.</p>
 </section>
 
@@ -18,7 +18,6 @@
       <div>
         <div class="wsa-stat-value" id="statTotal"><span class="wsa-skeleton"></span></div>
         <div class="wsa-stat-label">Total Scans</div>
-        <div class="wsa-stat-trend wsa-trend-flat" id="trendTotal"></div>
       </div>
       <canvas class="wsa-stat-spark" id="sparkTotal"></canvas>
     </div>
@@ -29,7 +28,6 @@
       <div>
         <div class="wsa-stat-value" id="statHigh"><span class="wsa-skeleton"></span></div>
         <div class="wsa-stat-label">High Risk Findings</div>
-        <div class="wsa-stat-trend wsa-trend-flat" id="trendHigh"></div>
       </div>
       <canvas class="wsa-stat-spark" id="sparkHigh"></canvas>
     </div>
@@ -40,7 +38,6 @@
       <div>
         <div class="wsa-stat-value" id="statMedium"><span class="wsa-skeleton"></span></div>
         <div class="wsa-stat-label">Medium Risk Findings</div>
-        <div class="wsa-stat-trend wsa-trend-flat" id="trendMedium"></div>
       </div>
       <canvas class="wsa-stat-spark" id="sparkMedium"></canvas>
     </div>
@@ -51,7 +48,6 @@
       <div>
         <div class="wsa-stat-value" id="statLow"><span class="wsa-skeleton"></span></div>
         <div class="wsa-stat-label">Low Risk Findings</div>
-        <div class="wsa-stat-trend wsa-trend-flat" id="trendLow"></div>
       </div>
       <canvas class="wsa-stat-spark" id="sparkLow"></canvas>
     </div>
@@ -61,6 +57,51 @@
 <div id="emptyBanner" class="wsa-banner-info mb-3" hidden>
   <i class="bi bi-info-circle"></i>
   No scans performed yet. Start your first authorized audit.
+</div>
+
+<!-- ===================== LIVE FINDINGS (real time) ===================== -->
+<div class="row g-3 mb-3">
+  <div class="col-12">
+    <div class="wsa-card wsa-chart-card">
+      <div class="wsa-card-head">
+        <div>
+          <h6 class="wsa-section-title">Live Findings
+            <span class="wsa-live-badge" id="liveBadge">
+              <span class="wsa-live-dot"></span><b id="liveBadgeText">Live</b>
+            </span>
+          </h6>
+          <span class="wsa-section-sub">Findings by category as they are discovered — updates in realtime</span>
+        </div>
+        <div class="wsa-live-controls">
+          <span class="wsa-live-stamp" id="liveStamp"></span>
+          <div class="wsa-seg wsa-live-seg" role="tablist" aria-label="Live chart window">
+            <button type="button" class="wsa-live-seg-btn active" data-live-window="hour">1 hour</button>
+            <button type="button" class="wsa-live-seg-btn" data-live-window="day">24 hours</button>
+            <button type="button" class="wsa-live-seg-btn" data-live-window="30d">30 days</button>
+          </div>
+        </div>
+      </div>
+      <div id="liveLoading" class="wsa-chart-loading">
+        <span class="wsa-spinner"></span> Loading live chart…
+      </div>
+      <div id="liveError" class="wsa-chart-error" hidden>
+        <i class="bi bi-wifi-off"></i>
+        <b>Couldn't load the live chart.</b>
+        <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button>
+      </div>
+      <div id="liveEmpty" class="wsa-chart-empty" hidden>
+        <i class="bi bi-broadcast-pin"></i>
+        <b id="liveEmptyTitle">No findings in this window yet.</b>
+        <span id="liveEmptyNote">Run a scan and findings will appear here as they are found.</span>
+      </div>
+      <div id="liveChartWrap" class="wsa-trend-wrap wsa-trend-night" hidden>
+        <div id="liveDotLegend" class="wsa-dot-legend"></div>
+        <div class="wsa-trend-stage">
+          <canvas id="liveTrendChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div class="row g-3 mb-3">
@@ -145,9 +186,9 @@
         <b>No trend data yet.</b>
         Findings from your scans will be charted here over time.
       </div>
-      <div id="trendChartWrap" class="wsa-trend-wrap" hidden>
+      <div id="trendChartWrap" class="wsa-trend-wrap wsa-trend-night" hidden>
         <div id="trendDotLegend" class="wsa-dot-legend"></div>
-        <div style="position:relative;height:320px">
+        <div class="wsa-trend-stage">
           <canvas id="trendChart"></canvas>
         </div>
       </div>
@@ -224,15 +265,22 @@
 
   // ---------- Vulnerability Trend (multi-line) ----------
   let trend = null;
+  let live = null;               // the real-time chart (shares the night style)
   let trendMode = "types";
   let trendDays = 30;
   let trendGran = "day";
   let trendMeta = { mode: "types", dates: [], series: [] };  // last server payload
   const hiddenKeys = new Set();
 
-  function buildTrend() {
-    const el = document.getElementById("trendChart");
+  const TREND_FX = { t0: performance.now() };   // animation clock shared by plugins
+
+  // Shared night-panel line builder. The daily trend and the live chart both
+  // use it, so every line, tooltip, axis and animation matches exactly.
+  function buildNightChart(canvasId) {
+    const el = document.getElementById(canvasId);
     if (!el || typeof Chart === "undefined") return null;
+
+    // dashed hover crosshair (light on dark)
     const hoverRowPlugin = {
       id: "wsaHoverRow",
       afterDatasetsDraw(chart) {
@@ -243,19 +291,135 @@
         ctx.save();
         ctx.beginPath();
         ctx.setLineDash([4, 4]);
-        ctx.lineWidth = 1.4;
-        ctx.strokeStyle = "rgba(15, 42, 92, .45)";
+        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = "rgba(148, 178, 255, .35)";
         ctx.moveTo(px, a.top);
         ctx.lineTo(px, a.bottom);
         ctx.stroke();
         ctx.restore();
       },
     };
+
+    // moving FX: glowing comets travelling along each visible line + pulsing heads
+    const cometPlugin = {
+      id: "wsaComets",
+      afterDatasetsDraw(chart) {
+        if (document.hidden) return;
+        const { ctx, chartArea } = chart;
+        if (!chartArea) return;
+        const now = performance.now();
+        chart.data.datasets.forEach((ds, i) => {
+          const meta = chart.getDatasetMeta(i);
+          if (meta.hidden) return;
+          const pts = meta.data;
+          if (!pts || !pts.length) return;
+          const color = ds.borderColor;
+
+          // A series with a single point has no line to travel along, and
+          // Chart.js draws nothing for it by default. That is the normal state
+          // on day one of scanning, so pulse the lone point instead: the
+          // newest finding must still be visibly alive.
+          if (pts.length < 2) {
+            const p = pts[0];
+            const pulse = 0.5 + 0.5 * Math.sin(now / 420);
+            ctx.save();
+            ctx.globalAlpha = 0.18 + 0.22 * pulse;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 9 + 7 * pulse, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12;
+            ctx.fillStyle = "#fff";
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+            return;
+          }
+
+          // total polyline length for uniform comet speed
+          let total = 0;
+          const segs = [];
+          for (let p = 1; p < pts.length; p++) {
+            const dx = pts[p].x - pts[p - 1].x, dy = pts[p].y - pts[p - 1].y;
+            const len = Math.hypot(dx, dy);
+            segs.push(len); total += len;
+          }
+          if (total <= 0) return;
+
+          const T = 4200 + total * 2.2;                       // loop duration (px/s ~ constant)
+          const u = ((now - TREND_FX.t0) % T) / T;            // 0..1 position
+          const target = u * total;
+          let acc = 0, cx = pts[0].x, cy = pts[0].y;
+          for (let p = 0; p < segs.length; p++) {
+            if (acc + segs[p] >= target) {
+              const f = (target - acc) / (segs[p] || 1);
+              cx = pts[p].x + (pts[p + 1].x - pts[p].x) * f;
+              cy = pts[p].y + (pts[p + 1].y - pts[p].y) * f;
+              break;
+            }
+            acc += segs[p];
+          }
+
+          // comet tail (short gradient trail along the line)
+          const tail = Math.min(60, total * 0.12);
+          const tEnd = Math.max(0, target - tail);
+          let tAcc = 0, tx = pts[0].x, ty = pts[0].y, found = false;
+          for (let p = 0; p < segs.length; p++) {
+            if (tAcc + segs[p] >= tEnd) {
+              const f = (tEnd - tAcc) / (segs[p] || 1);
+              tx = pts[p].x + (pts[p + 1].x - pts[p].x) * f;
+              ty = pts[p].y + (pts[p + 1].y - pts[p].y) * f;
+              found = true;
+              break;
+            }
+            tAcc += segs[p];
+          }
+          if (found) {
+            const grad = ctx.createLinearGradient(tx, ty, cx, cy);
+            grad.addColorStop(0, hexA(color, 0));
+            grad.addColorStop(1, hexA(color, 0.9));
+            ctx.save();
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 3.2;
+            ctx.lineCap = "round";
+            ctx.shadowColor = color;
+            ctx.shadowBlur = 12;
+            ctx.beginPath();
+            ctx.moveTo(tx, ty);
+            ctx.lineTo(cx, cy);
+            ctx.stroke();
+            ctx.restore();
+          }
+
+          // comet head: bright dot with glow
+          ctx.save();
+          ctx.shadowColor = color;
+          ctx.shadowBlur = 14;
+          ctx.fillStyle = "#fff";
+          ctx.beginPath();
+          ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = color;
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        });
+      },
+    };
+
     return new Chart(el, {
       type: "line",
       data: { labels: [], datasets: [] },
       options: {
         responsive: true, maintainAspectRatio: false,
+        animation: { duration: 1400, easing: "easeOutQuart" },   // draw-in animation
+        animationDuration: 1400,
         interaction: { mode: "index", intersect: false },
         layout: { padding: { right: 8 } },
         plugins: {
@@ -266,12 +430,37 @@
           },
         },
         scales: {
-          x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10, color: "#5b6b85", font: { size: 11 } }, border: { color: "#e3e9f4" } },
-          y: { beginAtZero: true, ticks: { precision: 0, color: "#5b6b85", font: { size: 11 } }, grid: { color: "#eef2f8" }, border: { display: false } },
+          x: { grid: { color: "rgba(148, 178, 255, .08)", borderDash: [3, 5] },
+               ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12, color: "#8fa3c8", font: { size: 11 } },
+               border: { color: "rgba(148, 178, 255, .18)" } },
+          y: { beginAtZero: true,
+               ticks: { precision: 0, color: "#8fa3c8", font: { size: 11 } },
+               grid: { color: "rgba(148, 178, 255, .08)", borderDash: [3, 5] },
+               border: { display: false } },
         },
       },
-      plugins: [hoverRowPlugin],
+      plugins: [hoverRowPlugin, cometPlugin],
     });
+  }
+
+  // Continuous animation loop: redraws the chart each frame so the comets
+  // travel along the lines. Runs only while the tab and chart are visible.
+  (function cometLoop() {
+    const wrap = document.getElementById("trendChartWrap");
+    const liveWrap = document.getElementById("liveChartWrap");
+    if (trend && wrap && !wrap.hidden && !document.hidden) {
+      try { trend.draw(); } catch (_) { /* chart mid-update */ }
+    }
+    if (live && liveWrap && !liveWrap.hidden && !document.hidden) {
+      try { live.draw(); } catch (_) { /* chart mid-update */ }
+    }
+    requestAnimationFrame(cometLoop);
+  })();
+
+  // #rrggbb + alpha helper for canvas gradients
+  function hexA(hex, a) {
+    const n = parseInt(hex.slice(1), 16);
+    return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${a})`;
   }
 
   // Reference-style dark tooltip: date header + one dot row per series.
@@ -310,36 +499,43 @@
     renderTypeMenu();
   }
 
+  // neon palette for the midnight chart (assigned in stable order per key)
+  const NEON_PALETTE = ["#6366f1", "#22d3ee", "#ec4899", "#a78bfa", "#34d399",
+                        "#fbbf24", "#f87171", "#38bdf8", "#c084fc", "#4ade80"];
+
   function renderTrend() {
-    const chart = trend || (trend = buildTrend());
+    const chart = trend || (trend = buildNightChart("trendChart"));
     if (!chart) return;
     const { dates, series } = trendMeta;
     const visible = series.filter((s) => !hiddenKeys.has(s.key));
     chart.data.labels = dates.map((d) => d.slice(5));  // MM-DD keeps the axis readable
-    chart.data.datasets = visible.map((s) => ({
+    chart.data.datasets = visible.map((s, i) => ({
       key: s.key,
       label: s.label,
       data: s.data,
       borderColor: s.color,
-      backgroundColor: (ctx) => {                    // vertical gradient fill under each line
+      backgroundColor: (ctx) => {                    // vertical neon gradient fill under each line
         const { ctx: c, chartArea } = ctx.chart;
         if (!chartArea) return "transparent";
         const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        g.addColorStop(0, s.color + "3d");           // ~24% opacity at the line
-        g.addColorStop(1, s.color + "05");           // fade to ~2% at the axis
+        g.addColorStop(0, hexA(s.color, 0.35));      // glow at the line
+        g.addColorStop(0.55, hexA(s.color, 0.10));
+        g.addColorStop(1, hexA(s.color, 0.02));      // fade at the axis
         return g;
       },
-      pointBackgroundColor: "#fff",
+      pointBackgroundColor: "#0b1220",
       pointBorderColor: s.color,
       pointBorderWidth: 2,
       pointRadius: 3.5,
       pointHoverRadius: 6,
       pointHoverBorderWidth: 2.5,
+      pointHoverBackgroundColor: "#fff",
       borderWidth: 2.5,
-      tension: 0.35,
+      tension: 0.42,                                 // extra-smooth flowing curves
       fill: true,
       spanGaps: true,
     }));
+    TREND_FX.t0 = performance.now();                 // restart comet cycles in sync
     chart.update();
     renderDotLegend(visible);
   }
@@ -374,6 +570,173 @@
     });
   }
 
+  // ---------- Live findings chart (real time) ----------
+  let liveWindow = "hour";
+  let liveMeta = { buckets: [], series: [] };  // last server payload
+  let liveLoaded = false;                      // the first paint happened
+  let liveLastFetch = 0;
+  let liveQueued = null;
+  let liveOmitted = 0;
+  const liveHidden = new Set();
+  const liveColors = {};                       // key -> colour, stable across ticks
+
+  function liveBucketLabel(iso) {
+    const d = new Date(iso);
+    if (liveWindow === "30d") {
+      return d.toLocaleDateString([], { month: "2-digit", day: "2-digit" });
+    }
+    return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+
+  function renderLiveLegend(visible) {
+    const box = document.getElementById("liveDotLegend");
+    if (!box) return;
+    let html = visible.map((s) => `
+      <button type="button" class="wsa-dot-legend-item ${liveHidden.has(s.key) ? "off" : ""}" data-key="${esc(s.key)}">
+        <span class="wsa-dot-swatch" style="background:${s.color}"></span>${esc(s.label)}
+      </button>`).join("");
+    if (liveOmitted > 0) {
+      html += `<span class="wsa-dot-legend-more">+${liveOmitted} more categor${liveOmitted === 1 ? "y" : "ies"}</span>`;
+    }
+    box.innerHTML = html;
+    box.querySelectorAll(".wsa-dot-legend-item").forEach((b) => {
+      b.addEventListener("click", () => {
+        const k = b.dataset.key;
+        if (liveHidden.has(k)) liveHidden.delete(k); else liveHidden.add(k);
+        renderLive();
+      });
+    });
+  }
+
+  function renderLive(updateMode) {
+    const chart = live || (live = buildNightChart("liveTrendChart"));
+    if (!chart) return;
+    const visible = liveMeta.series.filter((s) => !liveHidden.has(s.key));
+    const last = liveMeta.buckets.length - 1;
+    chart.data.labels = liveMeta.buckets.map(liveBucketLabel);
+    chart.data.datasets = visible.map((s) => {
+      const peak = Math.max(0, ...s.data);
+      return {
+        key: s.key,
+        label: s.label,
+        data: s.data,
+        borderColor: s.color,
+        backgroundColor: (ctx) => {                      // vertical neon glow
+          const { ctx: c, chartArea } = ctx.chart;
+          if (!chartArea) return "transparent";
+          const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+          g.addColorStop(0, hexA(s.color, 0.35));
+          g.addColorStop(0.55, hexA(s.color, 0.10));
+          g.addColorStop(1, hexA(s.color, 0.02));
+          return g;
+        },
+        pointRadius: (ctx) => {                          // peak + "now" markers
+          const v = ctx.dataset.data[ctx.dataIndex] || 0;
+          if (ctx.dataIndex === last) return v > 0 ? 5 : 3;
+          return v > 0 && v === peak ? 4.5 : 3;
+        },
+        pointBackgroundColor: "#0b1220",
+        pointBorderColor: s.color,
+        pointBorderWidth: 2,
+        pointHoverRadius: 6,
+        pointHoverBorderWidth: 2.5,
+        pointHoverBackgroundColor: "#fff",
+        borderWidth: 2.5,
+        tension: 0.42,
+        fill: true,
+        spanGaps: true,
+      };
+    });
+    TREND_FX.t0 = performance.now();                     // sync the comets
+    chart.update(updateMode || "active");
+    renderLiveLegend(visible);
+  }
+
+  function stampLive(d) {
+    const badge = document.getElementById("liveBadge");
+    const text = document.getElementById("liveBadgeText");
+    if (badge && text) {
+      badge.classList.toggle("scanning", !!d.scanning);
+      text.textContent = d.scanning ? "Scanning" : "Live";
+    }
+    const n = d.events || 0;
+    const stamp = document.getElementById("liveStamp");
+    if (stamp) {
+      stamp.innerHTML = `<i class="bi bi-clock-history"></i> updated ${new Date().toLocaleTimeString()} · ` +
+        `${WSA.fmt(n)} finding${n === 1 ? "" : "s"} in window`;
+    }
+  }
+
+  // Socket events arrive in bursts during a scan; throttling collapses a burst
+  // of "new_finding" messages into a single API call.
+  function loadLive() {
+    const now = Date.now();
+    if (now - liveLastFetch < 1500) {
+      if (!liveQueued) {
+        liveQueued = setTimeout(() => { liveQueued = null; loadLive(); }, 1500);
+      }
+      return;
+    }
+    liveLastFetch = now;
+    return loadLiveNow();
+  }
+
+  async function loadLiveNow() {
+    if (document.hidden && liveLoaded) return;            // catches up when the tab returns
+    if (!liveLoaded) setChartState("live", "loading");
+    try {
+      const d = await WSA.api("/api/dashboard/live-trend?window=" + encodeURIComponent(liveWindow));
+      if (d.error) throw new Error(d.error);
+      liveOmitted = d.omitted || 0;
+      if (d.empty || !d.series.length) {
+        liveMeta = { buckets: d.buckets || [], series: [] };
+        setChartState("live", "empty");
+        setText("liveEmptyTitle", d.scanning ? "Scanning now…" : "No findings in this window yet.");
+        setText("liveEmptyNote", d.scanning
+          ? "Waiting for the first finding — the chart updates the moment one arrives."
+          : "Run a scan and findings will appear here as they are found.");
+      } else {
+        d.series.forEach((s) => {                        // colour per key, never re-shuffled
+          if (!(s.key in liveColors)) {
+            liveColors[s.key] = NEON_PALETTE[Object.keys(liveColors).length % NEON_PALETTE.length];
+          }
+          s.color = liveColors[s.key];
+        });
+        liveMeta = { buckets: d.buckets, series: d.series };
+        setChartState("live", "ok");
+        renderLive(liveLoaded ? "none" : "active");      // no entrance animation per tick
+      }
+      liveLoaded = true;
+      stampLive(d);
+    } catch (e) {
+      if (liveLoaded) {                                  // keep the last good chart on screen
+        const stamp = document.getElementById("liveStamp");
+        if (stamp) stamp.innerHTML = `<i class="bi bi-exclamation-triangle"></i> ${esc(e.message)}`;
+      } else {
+        setChartState("live", "error");
+      }
+    }
+  }
+
+  function initLiveControls() {
+    document.querySelectorAll("[data-live-window]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (btn.dataset.liveWindow === liveWindow) return;
+        document.querySelectorAll("[data-live-window]").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        liveWindow = btn.dataset.liveWindow;
+        liveLoaded = false;                              // show the loading state for a switch
+        loadLive();
+      });
+    });
+  }
+  initLiveControls();
+
+  // The live chart ticks on its own: a running scan must move the lines even
+  // when no socket event fires, and an idle dashboard still shows "now".
+  setInterval(() => { if (!document.hidden) loadLive(); }, 10000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) loadLive(); });
+
   // ---------- card state helper: loading | error | empty | ok ----------
   function setChartState(prefix, state) {
     const loading = document.getElementById(prefix + "Loading");
@@ -403,28 +766,16 @@
     });
   }
 
-  function setTrend(id, v) {
-    const el = document.getElementById(id);
-    if (!el) return;
-    if (v === null || v === undefined) { el.className = "wsa-stat-trend wsa-trend-flat"; el.textContent = "—"; return; }
-    el.className = "wsa-stat-trend " + (v > 0 ? "wsa-trend-up" : v < 0 ? "wsa-trend-down" : "wsa-trend-flat");
-    el.innerHTML = v > 0 ? `<i class="bi bi-arrow-up-right"></i> +${v}% vs prev. period`
-                 : v < 0 ? `<i class="bi bi-arrow-down-right"></i> ${v}% vs prev. period`
-                 : `<i class="bi bi-dash"></i> 0% vs prev. period`;
-  }
-
   async function loadSummary() {
     try {
       const d = await WSA.api("/api/dashboard/summary");
       document.getElementById("dashError").hidden = true;
-      setText("statTotal", WSA.fmt(d.total_scans));
+      // every scan counts -- queued or running ones included -- so the card
+      // always equals the number of rows in the Scans list
+      setText("statTotal", WSA.fmt(d.total_scans_all));
       setText("statHigh", WSA.fmt(d.high_risk));
       setText("statMedium", WSA.fmt(d.medium_risk));
       setText("statLow", WSA.fmt(d.low_risk));
-      setTrend("trendTotal", d.trend?.total_scans);
-      setTrend("trendHigh", d.trend?.high);
-      setTrend("trendMedium", d.trend?.medium);
-      setTrend("trendLow", d.trend?.low);
       document.getElementById("emptyBanner").hidden = !d.empty;
       sparkline("sparkTotal", "#1a56db", d.sparklines);
       sparkline("sparkHigh", "#dc2626", d.sparklines);
@@ -489,9 +840,12 @@
       const typeColors = {};
       let next = 0;
       d.series.forEach((s) => {
-        if (trendMode === "severity") s.color = SEV_COLORS[s.key] || "#64748b";
-        else {
-          if (!(s.key in typeColors)) typeColors[s.key] = TYPE_PALETTE[next++ % TYPE_PALETTE.length];
+        if (trendMode === "severity") {
+          // neon-brightened severity colors so they glow on the dark panel
+          s.color = { critical: "#f87171", high: "#fb7185", medium: "#fbbf24",
+                      low: "#34d399", informational: "#38bdf8" }[s.key] || "#94a3b8";
+        } else {
+          if (!(s.key in typeColors)) typeColors[s.key] = NEON_PALETTE[next++ % NEON_PALETTE.length];
           s.color = typeColors[s.key];
         }
       });
@@ -577,7 +931,9 @@
   initTrendControls();
   initGranularity();
 
-  WSA.refreshers.push(() => { loadSummary(); loadDonut(); loadTrend(); loadRecent(); });
+  WSA.refreshers.push(() => {
+    loadSummary(); loadDonut(); loadTrend(); loadRecent(); loadLive();
+  });
 })();
 </script>
 {% endblock %}

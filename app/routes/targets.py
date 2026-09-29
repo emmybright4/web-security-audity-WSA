@@ -6,11 +6,13 @@ from sqlalchemy import desc, func
 
 from ..extensions import db
 from ..models import Scan, Vulnerability
+from ._api_guard import api_login_required
 
 bp = Blueprint("targets", __name__, url_prefix="/api/targets")
 
 
 @bp.get("")
+@api_login_required
 def list_targets():
     try:
         scans = Scan.query.order_by(desc(Scan.created_at)).all()
@@ -45,6 +47,7 @@ def list_targets():
 
 
 @bp.get("/<path:target_url>/scans")
+@api_login_required
 def target_scans(target_url):
     try:
         scans = (Scan.query.filter_by(target_url=target_url)
@@ -55,6 +58,7 @@ def target_scans(target_url):
 
 
 @bp.post("/validate")
+@api_login_required
 def validate_target():
     from ..utils import is_local_target, is_valid_url, normalize_url
     data = request.get_json(silent=True) or {}

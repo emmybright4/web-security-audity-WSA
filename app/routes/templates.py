@@ -3,11 +3,13 @@ from flask import Blueprint, jsonify, request
 
 from ..extensions import db
 from ..models import ScanTemplate
+from ._api_guard import api_login_required
 
 bp = Blueprint("templates", __name__, url_prefix="/api/templates")
 
 
 @bp.get("")
+@api_login_required
 def list_templates():
     try:
         rows = ScanTemplate.query.order_by(ScanTemplate.created_at.desc()).all()
@@ -17,6 +19,7 @@ def list_templates():
 
 
 @bp.post("")
+@api_login_required
 def create_template():
     data = request.get_json(silent=True) or {}
     name = (data.get("name") or "").strip()
@@ -43,6 +46,7 @@ def create_template():
 
 
 @bp.delete("/<int:template_id>")
+@api_login_required
 def delete_template(template_id):
     tpl = db.session.get(ScanTemplate, template_id)
     if tpl is None:

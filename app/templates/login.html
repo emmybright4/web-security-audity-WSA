@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+{% block content %}{% endblock %}
+
+{% block auth %}
+<style>
+  body { overflow-x: hidden; }
+  .wsa-shell { display: none !important; }
+</style>
+
+<div class="auth-shell">
+  <!-- ============ Brand panel ============ -->
+  <div class="auth-brand">
+    <div class="auth-brand-inner">
+      <div class="auth-logo"><i class="bi bi-shield-shaded"></i></div>
+      <h1>WSA</h1>
+      <p class="auth-tagline">Web Security Auditing</p>
+      <p class="auth-desc">Discover. Analyze. Secure. One platform for scanning, tracking and
+        reporting real web vulnerabilities.</p>
+
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-radar"></i></span>
+        <div><b>Multi-engine scanning</b><span>Playwright, ZAP, Nuclei &amp; SQLi in one pipeline</span></div>
+      </div>
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-graph-up-arrow"></i></span>
+        <div><b>Live dashboards</b><span>Realtime findings, trends and severity analytics</span></div>
+      </div>
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-file-earmark-pdf"></i></span>
+        <div><b>Pro reports</b><span>Executive-ready PDF reports in one click</span></div>
+      </div>
+    </div>
+    <div class="auth-brand-glow g1"></div>
+    <div class="auth-brand-glow g2"></div>
+  </div>
+
+  <!-- ============ Form panel ============ -->
+  <div class="auth-panel">
+    <div class="auth-card">
+      <h2>Welcome back</h2>
+      {% if email_code_required %}
+      <p class="auth-sub">Sign in with your email address — we'll email you a one-time code to
+        confirm it's really you.</p>
+      {% else %}
+      <p class="auth-sub">Sign in with your email address and password.</p>
+      {% endif %}
+
+      <div class="auth-error" id="authError" hidden>
+        <i class="bi bi-exclamation-octagon"></i><span></span>
+      </div>
+
+      <form id="loginForm" novalidate>
+        <label class="wsa-label" for="identifier">Email address</label>
+        <div class="auth-field">
+          <i class="bi bi-envelope"></i>
+          <input id="identifier" type="email" autocomplete="email" inputmode="email"
+                 placeholder="you@example.com" required>
+        </div>
+
+        <label class="wsa-label" for="password">Password</label>
+        <div class="auth-field">
+          <i class="bi bi-lock"></i>
+          <input id="password" type="password" autocomplete="current-password" placeholder="Your password" required>
+          <button type="button" class="auth-eye" data-target="password" aria-label="Show password">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+
+        <div class="auth-row">
+          <label class="auth-remember mb-0">
+            <input type="checkbox" id="remember" checked> Keep me signed in
+          </label>
+          <a class="auth-forgot" href="{{ url_for('auth.forgot_password_page') }}">Forgot Password?</a>
+        </div>
+
+        {% if email_code_required %}
+        <div class="auth-note">
+          <i class="bi bi-envelope-check"></i>
+          <span>A {{ otp_length or 6 }}-digit code will be emailed to you to finish signing in.</span>
+        </div>
+        {% endif %}
+
+        <button type="submit" class="auth-submit" id="loginBtn">
+          <span class="auth-spinner" hidden></span>
+          <i class="bi bi-box-arrow-in-right"></i> Sign in
+        </button>
+      </form>
+
+      <p class="auth-switch">New to WSA?
+        <a href="{{ url_for('auth.register_page') }}">Create an account</a>
+      </p>
+    </div>
+    <p class="auth-legal"><i class="bi bi-shield-check"></i> Authorized testing only — scan only systems you own or have permission to test.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  // password visibility toggles
+  document.querySelectorAll(".auth-eye").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = $(btn.dataset.target);
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.innerHTML = `<i class="bi bi-eye${show ? "-slash" : ""}"></i>`;
+    });
+  });
+
+  function showError(msg) {
+    const box = $("authError");
+    box.querySelector("span").textContent = msg;
+    box.hidden = false;
+  }
+
+  $("loginForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("authError").hidden = true;
+    const btn = $("loginBtn");
+    btn.disabled = true;
+    btn.querySelector(".auth-spinner").hidden = false;
+    try {
+      const d = await WSA.api("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({
+          identifier: $("identifier").value.trim(),
+          password: $("password").value,
+          remember: $("remember").checked,
+        }),
+      });
+      // A successful MFA step also answers with a redirect to /verify.
+      location.href = d.next || "/";
+    } catch (err) {
+      showError(err.message);
+      btn.disabled = false;
+      btn.querySelector(".auth-spinner").hidden = true;
+    }
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,1064 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+/* IP Scanning page specific styles */
+.ip-scan-hero {
+  background: linear-gradient(135deg, #0f2a5c 0%, #1a56db 100%);
+  border-radius: 16px; padding: 32px 36px; color: #fff;
+  margin-bottom: 24px; position: relative; overflow: hidden;
+}
+.ip-scan-hero::before {
+  content: ''; position: absolute; top: -60px; right: -40px;
+  width: 300px; height: 300px; border-radius: 50%;
+  background: rgba(47,107,255,.2); filter: blur(60px);
+}
+.ip-scan-hero h2 { font-size: 24px; font-weight: 800; margin: 0 0 6px; position: relative; }
+.ip-scan-hero p { font-size: 14px; color: #c9d7f2; margin: 0; position: relative; line-height: 1.6; }
+.ip-scan-hero-actions { position: relative; display: flex; gap: 12px; margin-top: 18px; }
+.ip-scan-hero .wsa-btn-primary { background: #fff; color: #1a56db; box-shadow: 0 4px 14px rgba(0,0,0,.2); }
+.ip-scan-hero .wsa-btn-primary:hover { filter: brightness(.95); color: #1a56db; }
+.ip-scan-hero .wsa-btn-ghost { background: rgba(255,255,255,.12); border-color: rgba(255,255,255,.2); color: #fff; }
+.ip-scan-hero .wsa-btn-ghost:hover { background: rgba(255,255,255,.2); color: #fff; }
+
+/* Scan config card */
+.ip-config-card { border-left: 4px solid #1a56db; }
+.ip-config-card .form-check-input:checked { background-color: #1a56db; border-color: #1a56db; }
+
+/* Scan profile radio cards */
+.ip-profile-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+.ip-profile-card {
+  border: 2px solid #e5e7eb; border-radius: 12px; padding: 14px 16px; cursor: pointer;
+  transition: all .15s ease; background: #fff; position: relative;
+}
+.ip-profile-card:hover { border-color: #93bbfb; }
+.ip-profile-card.selected { border-color: #1a56db; background: #eef4ff; }
+.ip-profile-card input { display: none; }
+.ip-profile-card .ip-profile-name { font-size: 14px; font-weight: 700; color: #0f2a5c; margin-bottom: 3px; }
+.ip-profile-card .ip-profile-desc { font-size: 12px; color: #5b6b85; line-height: 1.4; }
+
+/* Toggle switches */
+.ip-toggle {
+  display: flex; align-items: center; gap: 12px; padding: 10px 0;
+  border-bottom: 1px solid #f3f4f6;
+}
+.ip-toggle:last-child { border-bottom: 0; }
+.ip-toggle-label { font-size: 13.5px; font-weight: 600; color: #0f2a5c; flex: 1; }
+.ip-toggle-desc { font-size: 12px; color: #5b6b85; }
+.ip-switch {
+  position: relative; width: 44px; height: 24px; flex: 0 0 auto;
+}
+.ip-switch input { opacity: 0; width: 0; height: 0; }
+.ip-switch-slider {
+  position: absolute; inset: 0; background: #d1d5db; border-radius: 24px; cursor: pointer;
+  transition: background .2s ease;
+}
+.ip-switch-slider::before {
+  content: ''; position: absolute; height: 18px; width: 18px; left: 3px; bottom: 3px;
+  background: #fff; border-radius: 50%; transition: transform .2s ease;
+}
+.ip-switch input:checked + .ip-switch-slider { background: #1a56db; }
+.ip-switch input:checked + .ip-switch-slider::before { transform: translateX(20px); }
+
+/* Active scan state */
+.ip-active-scan {
+  background: linear-gradient(135deg, #eff6ff, #f0fdf4);
+  border: 1px solid #c7d9fb; border-radius: 16px; padding: 28px; margin-bottom: 24px;
+  animation: ip-glow 3s ease infinite;
+}
+@keyframes ip-glow { 0%,100% { box-shadow: 0 0 0 rgba(26,86,219,0); } 50% { box-shadow: 0 0 20px rgba(26,86,219,.1); } }
+.ip-active-header { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.ip-active-spinner {
+  width: 32px; height: 32px; border-radius: 50%; border: 3px solid #c7d9fb;
+  border-top-color: #1a56db; animation: wsa-rot .8s linear infinite;
+}
+.ip-active-title { font-size: 18px; font-weight: 800; color: #0f2a5c; }
+.ip-active-subtitle { font-size: 13px; color: #5b6b85; }
+.ip-active-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; }
+.ip-active-stat {
+  background: #fff; border-radius: 12px; padding: 14px; text-align: center;
+  border: 1px solid #e5e7eb;
+}
+.ip-active-stat-value { font-size: 24px; font-weight: 800; color: #0f2a5c; }
+.ip-active-stat-label { font-size: 11.5px; color: #5b6b85; font-weight: 600; text-transform: uppercase; letter-spacing: .4px; }
+
+/* Stage indicator */
+.ip-stages { display: flex; align-items: center; gap: 4px; margin: 16px 0; flex-wrap: wrap; }
+.ip-stage {
+  font-size: 11px; font-weight: 700; padding: 5px 10px; border-radius: 999px;
+  background: #e5e7eb; color: #6b7280; white-space: nowrap;
+}
+.ip-stage.active { background: #1a56db; color: #fff; }
+.ip-stage.done { background: #dcfce7; color: #15803d; }
+.ip-stage-arrow { color: #d1d5db; font-size: 10px; }
+
+/* Summary cards row */
+.ip-summary-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+.ip-summary-card {
+  background: #fff; border: 1px solid #e5e7eb; border-radius: 14px;
+  padding: 18px; display: flex; gap: 14px; align-items: flex-start;
+}
+.ip-summary-icon {
+  width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center;
+  font-size: 20px; color: #fff; flex: 0 0 auto;
+}
+.ip-summary-icon.blue { background: linear-gradient(135deg, #3b82f6, #1a56db); }
+.ip-summary-icon.red { background: linear-gradient(135deg, #f87171, #dc2626); }
+.ip-summary-icon.orange { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+.ip-summary-icon.green { background: linear-gradient(135deg, #4ade80, #16a34a); }
+.ip-summary-icon.purple { background: linear-gradient(135deg, #a78bfa, #7c3aed); }
+.ip-summary-icon.teal { background: linear-gradient(135deg, #2dd4bf, #0d9488); }
+.ip-summary-value { font-size: 26px; font-weight: 800; color: #0f2a5c; line-height: 1.1; }
+.ip-summary-label { font-size: 12px; color: #5b6b85; font-weight: 600; margin-top: 2px; }
+
+/* Section headers */
+.ip-section-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 16px; gap: 12px; flex-wrap: wrap;
+}
+.ip-section-title { font-size: 16px; font-weight: 800; color: #0f2a5c; margin: 0; }
+.ip-section-sub { font-size: 12.5px; color: #5b6b85; }
+
+/* Expandable host rows */
+.ip-host-expand { cursor: pointer; }
+.ip-host-expand:hover { background: #f6f9ff !important; }
+.ip-host-detail { display: none; }
+.ip-host-detail.open { display: table-row; }
+.ip-host-detail td { padding: 0 12px 16px 12px; background: #fafbfe; }
+.ip-host-detail-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 8px 0; }
+@media (max-width: 900px) { .ip-host-detail-inner { grid-template-columns: 1fr; } }
+.ip-detail-group h4 { font-size: 13px; font-weight: 800; color: #0f2a5c; margin: 0 0 8px; text-transform: uppercase; letter-spacing: .4px; }
+.ip-detail-item { display: flex; gap: 8px; font-size: 13px; padding: 4px 0; }
+.ip-detail-item dt { color: #5b6b85; font-weight: 600; min-width: 100px; }
+.ip-detail-item dd { color: #0f2a5c; font-weight: 500; margin: 0; }
+
+/* Vuln type filter chips */
+.ip-type-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.ip-type-chip {
+  font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 999px;
+  border: 1px solid #e5e7eb; background: #fff; color: #5b6b85; cursor: pointer;
+  transition: all .15s ease;
+}
+.ip-type-chip:hover { border-color: #93bbfb; color: #1a56db; }
+.ip-type-chip.active { background: #1a56db; color: #fff; border-color: #1a56db; }
+.ip-type-chip .ip-chip-count { background: rgba(0,0,0,.1); border-radius: 999px; padding: 1px 7px; margin-left: 6px; font-size: 11px; }
+
+/* Severity badge */
+.ip-sev { font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 999px; display: inline-block; }
+.ip-sev.critical { background: #fef2f2; color: #b91c1c; border: 1px solid #fecaca; }
+.ip-sev.high { background: #fff7ed; color: #c2410c; border: 1px solid #fed7aa; }
+.ip-sev.medium { background: #fefce8; color: #a16207; border: 1px solid #fde68a; }
+.ip-sev.low { background: #f0fdf4; color: #15803d; border: 1px solid #bbf7d0; }
+.ip-sev.informational { background: #f0f9ff; color: #1d4ed8; border: 1px solid #bae6fd; }
+
+/* Risk badge */
+.ip-risk { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; display: inline-block; }
+.ip-risk.critical { background: #fef2f2; color: #b91c1c; }
+.ip-risk.high { background: #fff7ed; color: #c2410c; }
+.ip-risk.medium { background: #fefce8; color: #a16207; }
+.ip-risk.low { background: #f0fdf4; color: #15803d; }
+.ip-risk.none { background: #f3f4f6; color: #6b7280; }
+
+/* Chart containers */
+.ip-chart-wrap { min-height: 280px; position: relative; }
+.ip-chart-empty {
+  min-height: 280px; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+  color: #9ca3af; font-size: 13px; text-align: center;
+}
+.ip-chart-empty i { font-size: 44px; color: #d1d5db; }
+
+/* Authorize notice */
+.ip-auth-notice {
+  background: #fef3c7; border: 1px solid #fde68a; border-radius: 12px;
+  padding: 12px 16px; font-size: 13px; color: #92400e; display: flex;
+  align-items: center; gap: 10px; margin-top: 16px;
+}
+.ip-auth-notice i { font-size: 18px; flex: 0 0 auto; }
+
+/* History table */
+.ip-history-badge { font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px; display: inline-block; }
+.ip-history-badge.completed { background: #dcfce7; color: #15803d; }
+.ip-history-badge.failed { background: #fee2e2; color: #b91c1c; }
+.ip-history-badge.cancelled { background: #f3f4f6; color: #6b7280; }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- ========== HERO / PAGE HEADER ========== -->
+<div class="ip-scan-hero">
+  <h2><i class="bi bi-pc-display-horizontal"></i> IP Scanning</h2>
+  <p>Discover hosts, open ports, services, software versions, and network-level security vulnerabilities across authorized IP addresses and networks.</p>
+  <div class="ip-scan-hero-actions">
+    <button class="btn wsa-btn wsa-btn-primary" onclick="document.getElementById('ipConfigSection').scrollIntoView({behavior:'smooth'})">
+      <i class="bi bi-plus-lg"></i> New IP Scan
+    </button>
+    <button class="btn wsa-btn wsa-btn-ghost" onclick="document.getElementById('ipHistorySection').scrollIntoView({behavior:'smooth'})">
+      <i class="bi bi-clock-history"></i> Scan History
+    </button>
+  </div>
+</div>
+
+<!-- ========== ACTIVE SCAN STATE ========== -->
+<div id="ipActiveScan" class="ip-active-scan" style="display:none;">
+  <div class="ip-active-header">
+    <div class="ip-active-spinner"></div>
+    <div>
+      <div class="ip-active-title">Scanning Network</div>
+      <div class="ip-active-subtitle" id="ipActiveTarget"></div>
+    </div>
+    <button class="btn btn-sm wsa-btn wsa-btn-danger" style="margin-left:auto;" onclick="cancelCurrentScan()">
+      <i class="bi bi-x-lg"></i> Cancel
+    </button>
+  </div>
+  <div class="ip-active-stats" id="ipActiveStats"></div>
+  <div class="ip-stages" id="ipStages"></div>
+  <div class="wsa-progress mt-3">
+    <div class="wsa-progress-bar" id="ipActiveProgress" style="width:0%"></div>
+  </div>
+</div>
+
+<!-- ========== SCAN CONFIGURATION ========== -->
+<div id="ipConfigSection" class="ip-config-card wsa-card" style="margin-bottom:24px;">
+  <div class="wsa-card-head">
+    <div>
+      <div class="wsa-section-title"><i class="bi bi-gear"></i> Start IP Scan</div>
+      <div class="wsa-section-sub">Configure and launch a network-level scan</div>
+    </div>
+  </div>
+  <form id="ipScanForm" onsubmit="return startIPScan(event)">
+    <!-- Target Input -->
+    <div class="mb-3">
+      <label class="wsa-label">Target</label>
+      <input type="text" class="wsa-input" id="ipTarget"
+             placeholder="192.168.1.0/24" required>
+      <div class="wsa-hint">Single IP (192.168.1.1), range (192.168.1.1-50), or CIDR (192.168.1.0/24)</div>
+    </div>
+
+    <!-- Scan Profile -->
+    <div class="mb-3">
+      <label class="wsa-label">Scan Profile</label>
+      <div class="ip-profile-cards" id="ipProfileCards">
+        <label class="ip-profile-card selected" data-profile="quick">
+          <input type="radio" name="scan_profile" value="quick" checked>
+          <div class="ip-profile-name"><i class="bi bi-lightning"></i> Quick Discovery</div>
+          <div class="ip-profile-desc">Fast host + port discovery on common ports</div>
+        </label>
+        <label class="ip-profile-card" data-profile="standard">
+          <input type="radio" name="scan_profile" value="standard">
+          <div class="ip-profile-name"><i class="bi bi-search"></i> Standard Network Scan</div>
+          <div class="ip-profile-desc">Comprehensive port scan with service detection</div>
+        </label>
+        <label class="ip-profile-card" data-profile="full">
+          <input type="radio" name="scan_profile" value="full">
+          <div class="ip-profile-name"><i class="bi bi-shield-shaded"></i> Full Vulnerability Scan</div>
+          <div class="ip-profile-desc">Deep scan: all ports, services, versions, CVE checks</div>
+        </label>
+        <label class="ip-profile-card" data-profile="custom">
+          <input type="radio" name="scan_profile" value="custom">
+          <div class="ip-profile-name"><i class="bi bi-sliders"></i> Custom Scan</div>
+          <div class="ip-profile-desc">Configure individual scan options below</div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Scan Options Toggles -->
+    <div class="mb-3">
+      <label class="wsa-label">Scan Options</label>
+      <div style="background:#fafbfe;border:1px solid #e5e7eb;border-radius:12px;padding:8px 16px;">
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_host_discovery"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">Host Discovery</div><div class="ip-toggle-desc">Identify live hosts in the target range</div></div>
+        </div>
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_port_discovery"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">Port Discovery</div><div class="ip-toggle-desc">Scan for open TCP ports</div></div>
+        </div>
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_service_detection"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">Service Detection</div><div class="ip-toggle-desc">Identify services running on open ports</div></div>
+        </div>
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_version_detection"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">Version Detection</div><div class="ip-toggle-desc">Determine software versions for detected services</div></div>
+        </div>
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_os_detection"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">OS Detection</div><div class="ip-toggle-desc">Fingerprint the operating system of discovered hosts</div></div>
+        </div>
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_vuln_detection"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">Vulnerability Detection</div><div class="ip-toggle-desc">Check for known CVEs and security misconfigurations</div></div>
+        </div>
+        <div class="ip-toggle">
+          <label class="ip-switch"><input type="checkbox" checked id="opt_ssl_tls"><span class="ip-switch-slider"></span></label>
+          <div><div class="ip-toggle-label">SSL/TLS Checks</div><div class="ip-toggle-desc">Analyze SSL/TLS configuration and certificate validity</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Authorization + Submit -->
+    <div class="ip-auth-notice">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      <div><strong>Only scan IP addresses and networks you are authorized to assess.</strong></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px;margin-top:14px;">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;font-weight:600;color:#0f2a5c;">
+        <input type="checkbox" id="ipAuthorized" class="form-check-input" style="accent-color:#1a56db;">
+        I confirm I am authorized to scan this target
+      </label>
+      <button type="submit" class="btn wsa-btn wsa-btn-primary" id="ipScanBtn" style="margin-left:auto;">
+        <i class="bi bi-radar"></i> Start Scan
+      </button>
+    </div>
+  </form>
+</div>
+
+<!-- ========== SCAN RESULTS SUMMARY ========== -->
+<div id="ipResultsSection" style="display:none;">
+  <div class="ip-section-head">
+    <div>
+      <div class="ip-section-title"><i class="bi bi-clipboard2-data"></i> Scan Results</div>
+      <div class="ip-section-sub" id="ipResultsTarget"></div>
+    </div>
+  </div>
+
+  <div class="ip-summary-grid" id="ipSummaryGrid">
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon blue"><i class="bi bi-pc-display"></i></div>
+      <div><div class="ip-summary-value" id="sumHosts">0</div><div class="ip-summary-label">Hosts Discovered</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon teal"><i class="bi bi-door-open"></i></div>
+      <div><div class="ip-summary-value" id="sumPorts">0</div><div class="ip-summary-label">Open Ports</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon purple"><i class="bi bi-plug"></i></div>
+      <div><div class="ip-summary-value" id="sumServices">0</div><div class="ip-summary-label">Services Detected</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon red"><i class="bi bi-bug"></i></div>
+      <div><div class="ip-summary-value" id="sumVulns">0</div><div class="ip-summary-label">Vulnerabilities</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon" style="background:linear-gradient(135deg,#ef4444,#b91c1c);"><i class="bi bi-exclamation-octagon"></i></div>
+      <div><div class="ip-summary-value" id="sumCritical">0</div><div class="ip-summary-label">Critical</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon orange"><i class="bi bi-exclamation-triangle"></i></div>
+      <div><div class="ip-summary-value" id="sumHigh">0</div><div class="ip-summary-label">High</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon" style="background:linear-gradient(135deg,#fbbf24,#d97706);"><i class="bi bi-exclamation-circle"></i></div>
+      <div><div class="ip-summary-value" id="sumMedium">0</div><div class="ip-summary-label">Medium</div></div>
+    </div>
+    <div class="ip-summary-card">
+      <div class="ip-summary-icon green"><i class="bi bi-info-circle"></i></div>
+      <div><div class="ip-summary-value" id="sumLow">0</div><div class="ip-summary-label">Low</div></div>
+    </div>
+  </div>
+
+  <!-- ========== DISCOVERED HOSTS ========== -->
+  <div class="wsa-card" style="margin-bottom:24px;">
+    <div class="wsa-card-head">
+      <div class="wsa-section-title"><i class="bi bi-pc-display"></i> Discovered Hosts</div>
+    </div>
+    <div class="wsa-table-wrap">
+      <table class="wsa-table" id="ipHostsTable">
+        <thead>
+          <tr>
+            <th>Host IP</th>
+            <th>Hostname</th>
+            <th>OS</th>
+            <th>Open Ports</th>
+            <th>Services</th>
+            <th>Vulnerabilities</th>
+            <th>Risk</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="ipHostsBody"></tbody>
+      </table>
+    </div>
+    <div class="wsa-empty" id="ipHostsEmpty" style="display:none;">
+      <i class="bi bi-pc-display-horizontal"></i>
+      <b>No hosts discovered</b>
+      Run a scan to discover hosts on your network.
+    </div>
+  </div>
+
+  <!-- ========== OPEN PORTS ========== -->
+  <div class="wsa-card" style="margin-bottom:24px;">
+    <div class="wsa-card-head">
+      <div class="wsa-section-title"><i class="bi bi-door-open"></i> Open Ports</div>
+    </div>
+    <div class="wsa-table-wrap">
+      <table class="wsa-table" id="ipPortsTable">
+        <thead>
+          <tr>
+            <th>Port</th>
+            <th>Protocol</th>
+            <th>Service</th>
+            <th>Version</th>
+            <th>Host</th>
+            <th>Status</th>
+            <th>Security Finding</th>
+          </tr>
+        </thead>
+        <tbody id="ipPortsBody"></tbody>
+      </table>
+    </div>
+    <div class="wsa-empty" id="ipPortsEmpty" style="display:none;">
+      <i class="bi bi-door-open"></i>
+      <b>No open ports detected</b>
+      Open ports will appear here after a scan.
+    </div>
+  </div>
+
+  <!-- ========== VULNERABILITY FINDINGS ========== -->
+  <div class="wsa-card" style="margin-bottom:24px;">
+    <div class="wsa-card-head">
+      <div>
+        <div class="wsa-section-title"><i class="bi bi-shield-exclamation"></i> IP Vulnerability Findings</div>
+        <div class="wsa-section-sub">Network-level security findings from the scanner</div>
+      </div>
+    </div>
+
+    <!-- Vulnerability type filter chips -->
+    <div class="ip-type-chips" id="ipVulnTypeChips"></div>
+
+    <div class="wsa-table-wrap">
+      <table class="wsa-table" id="ipVulnsTable">
+        <thead>
+          <tr>
+            <th>Vulnerability</th>
+            <th>Type</th>
+            <th>Severity</th>
+            <th>Host</th>
+            <th>Port</th>
+            <th>Service</th>
+            <th>CVE</th>
+            <th>CVSS</th>
+            <th>Status</th>
+            <th>Evidence</th>
+            <th>Recommendation</th>
+          </tr>
+        </thead>
+        <tbody id="ipVulnsBody"></tbody>
+      </table>
+    </div>
+    <div class="wsa-empty" id="ipVulnsEmpty" style="display:none;">
+      <i class="bi bi-shield-check"></i>
+      <b>No vulnerabilities detected</b>
+      Findings from IP scans will appear here.
+    </div>
+  </div>
+
+  <!-- ========== CHARTS ROW ========== -->
+  <div class="wsa-grid-2" style="margin-bottom:24px;">
+    <!-- Vulnerability Distribution by Host -->
+    <div class="wsa-card wsa-chart-card">
+      <div class="wsa-card-head">
+        <div class="wsa-section-title">Vulnerability Distribution by Host</div>
+      </div>
+      <div class="ip-chart-wrap" id="ipDistChartWrap">
+        <canvas id="ipDistChart"></canvas>
+      </div>
+      <div class="ip-chart-empty" id="ipDistEmpty">
+        <i class="bi bi-bar-chart"></i>
+        <span>No data to display</span>
+      </div>
+    </div>
+
+    <!-- Vulnerability Trends Across Scans -->
+    <div class="wsa-card wsa-chart-card">
+      <div class="wsa-card-head">
+        <div class="wsa-section-title">Vulnerability Trends</div>
+      </div>
+      <div class="ip-chart-wrap" id="ipTrendChartWrap">
+        <canvas id="ipTrendChart"></canvas>
+      </div>
+      <div class="ip-chart-empty" id="ipTrendEmpty">
+        <i class="bi bi-graph-up"></i>
+        <span>Complete at least one scan to see trends</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========== EMPTY STATE (before first scan) ========== -->
+<div id="ipEmptyState" class="wsa-card" style="margin-bottom:24px;">
+  <div class="wsa-empty">
+    <i class="bi bi-pc-display-horizontal"></i>
+    <b>No IP scans completed yet</b>
+    <span style="font-size:13.5px;max-width:400px;">Enter an authorized IP address, IP range, or CIDR network to begin your first scan.</span>
+  </div>
+</div>
+
+<!-- ========== SCAN HISTORY ========== -->
+<div id="ipHistorySection" class="wsa-card" style="margin-bottom:24px;">
+  <div class="wsa-card-head">
+    <div class="wsa-section-title"><i class="bi bi-clock-history"></i> IP Scan History</div>
+  </div>
+  <div class="wsa-table-wrap">
+    <table class="wsa-table" id="ipHistoryTable">
+      <thead>
+        <tr>
+          <th>Scan #</th>
+          <th>Target</th>
+          <th>Date/Time</th>
+          <th>Hosts</th>
+          <th>Ports</th>
+          <th>Services</th>
+          <th>Vulnerabilities</th>
+          <th>Critical</th>
+          <th>High</th>
+          <th>Medium</th>
+          <th>Low</th>
+          <th>Status</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="ipHistoryBody"></tbody>
+    </table>
+  </div>
+  <div class="wsa-empty" id="ipHistoryEmpty" style="display:none;">
+    <i class="bi bi-clock-history"></i>
+    <b>No scan history</b>
+    <span>Completed scans will appear here.</span>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  "use strict";
+
+  // ========== State ==========
+  let currentScanId = null;
+  let currentScanData = null;
+  let allVulns = [];
+  let allHosts = [];
+  let allPorts = [];
+  let activeVulnFilter = "all";
+  let distChart = null;
+  let trendChart = null;
+
+  const STAGES = [
+    "Initializing", "Discovering Hosts", "Scanning Ports",
+    "Detecting Services", "Detecting Versions", "Checking Vulnerabilities",
+    "Finalizing", "Completed"
+  ];
+
+  // ========== Profile card selection ==========
+  document.querySelectorAll(".ip-profile-card").forEach(card => {
+    card.addEventListener("click", () => {
+      document.querySelectorAll(".ip-profile-card").forEach(c => c.classList.remove("selected"));
+      card.classList.add("selected");
+      card.querySelector("input").checked = true;
+    });
+  });
+
+  // ========== Start IP Scan ==========
+  window.startIPScan = async function(e) {
+    e.preventDefault();
+    const target = document.getElementById("ipTarget").value.trim();
+    if (!target) { WSA.toast("Please enter a target.", "error"); return false; }
+    if (!document.getElementById("ipAuthorized").checked) {
+      WSA.toast("Please confirm you are authorized to scan this target.", "error");
+      return false;
+    }
+    const profile = document.querySelector('input[name="scan_profile"]:checked')?.value || "quick";
+    const btn = document.getElementById("ipScanBtn");
+    btn.disabled = true;
+    btn.innerHTML = '<span class="auth-spinner"></span> Starting...';
+
+    try {
+      const data = await WSA.api("/api/ip-scan", {
+        method: "POST",
+        body: JSON.stringify({
+          target,
+          scan_profile: profile,
+          authorized: "true",
+          host_discovery: document.getElementById("opt_host_discovery").checked,
+          port_discovery: document.getElementById("opt_port_discovery").checked,
+          service_detection: document.getElementById("opt_service_detection").checked,
+          version_detection: document.getElementById("opt_version_detection").checked,
+          os_detection: document.getElementById("opt_os_detection").checked,
+          vulnerability_detection: document.getElementById("opt_vuln_detection").checked,
+          ssl_tls_checks: document.getElementById("opt_ssl_tls").checked,
+        }),
+      });
+      currentScanId = data.scan.id;
+      showActiveScan(data.scan);
+      WSA.toast("IP scan started!", "success");
+    } catch (err) {
+      WSA.toast(err.message || "Failed to start scan", "error");
+    } finally {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-radar"></i> Start Scan';
+    }
+    return false;
+  };
+
+  // ========== Active scan UI ==========
+  function showActiveScan(scan) {
+    document.getElementById("ipActiveScan").style.display = "";
+    document.getElementById("ipActiveTarget").textContent =
+      `Target: ${scan.target} · Scan #${scan.scan_number} · ${scan.scan_profile} profile`;
+    updateActiveScan(scan);
+  }
+
+  function updateActiveScan(scan) {
+    const elapsed = scan.started_at ? timeDiff(scan.started_at) : "";
+    const stats = [
+      { label: "Target", value: truncate(scan.target, 30) },
+      { label: "Scan #", value: scan.scan_number || "-" },
+      { label: "Elapsed", value: elapsed },
+      { label: "Stage", value: scan.current_step || "Initializing" },
+      { label: "Hosts", value: scan.hosts_discovered || 0 },
+      { label: "Ports", value: scan.open_ports_count || 0 },
+      { label: "Services", value: scan.services_detected || 0 },
+      { label: "Vulns", value: scan.vulnerabilities_count || 0 },
+    ];
+    document.getElementById("ipActiveStats").innerHTML = stats.map(s =>
+      `<div class="ip-active-stat"><div class="ip-active-stat-value">${s.value}</div><div class="ip-active-stat-label">${s.label}</div></div>`
+    ).join("");
+
+    // Progress bar
+    document.getElementById("ipActiveProgress").style.width = (scan.progress || 0) + "%";
+
+    // Stage indicators
+    const step = (scan.current_step || "").toLowerCase();
+    document.getElementById("ipStages").innerHTML = STAGES.map(s => {
+      const sl = s.toLowerCase();
+      let cls = "ip-stage";
+      if (step.includes(sl) || (sl === "initializing" && scan.progress < 5)) cls += " active";
+      else if (scan.status === "completed") cls += " done";
+      return `<span class="${cls}">${s}</span><span class="ip-stage-arrow">→</span>`;
+    }).join("");
+  }
+
+  // ========== Cancel scan ==========
+  window.cancelCurrentScan = async function() {
+    if (!currentScanId) return;
+    try {
+      await WSA.api(`/api/ip-scan/${currentScanId}/cancel`, { method: "POST" });
+      WSA.toast("Scan cancellation requested.", "warn");
+    } catch (err) {
+      WSA.toast(err.message, "error");
+    }
+  };
+
+  // ========== Load results ==========
+  async function loadResults(scanId) {
+    try {
+      const data = await WSA.api(`/api/ip-scan/${scanId}`);
+      currentScanData = data;
+      allHosts = data.hosts || [];
+      allVulns = [];
+      allPorts = [];
+      allHosts.forEach(h => {
+        (h.ports || []).forEach(p => allPorts.push({ ...p, host_ip: h.ip_address }));
+        (h.vulns || []).forEach(v => allVulns.push(v));
+      });
+      renderResults(data.scan);
+    } catch (err) {
+      console.error("Failed to load IP scan results:", err);
+    }
+  }
+
+  function renderResults(scan) {
+    document.getElementById("ipResultsSection").style.display = "";
+    document.getElementById("ipEmptyState").style.display = "none";
+    document.getElementById("ipActiveScan").style.display = "none";
+    document.getElementById("ipResultsTarget").textContent =
+      `Scan #${scan.scan_number} · ${scan.target} · ${scan.scan_profile} profile`;
+
+    // Summary cards
+    document.getElementById("sumHosts").textContent = scan.hosts_discovered || 0;
+    document.getElementById("sumPorts").textContent = scan.open_ports_count || 0;
+    document.getElementById("sumServices").textContent = scan.services_detected || 0;
+    document.getElementById("sumVulns").textContent = scan.vulnerabilities_count || 0;
+    document.getElementById("sumCritical").textContent = scan.critical_count || 0;
+    document.getElementById("sumHigh").textContent = scan.high_count || 0;
+    document.getElementById("sumMedium").textContent = scan.medium_count || 0;
+    document.getElementById("sumLow").textContent = scan.low_count || 0;
+
+    renderHosts();
+    renderPorts();
+    renderVulns();
+    renderDistChart();
+    loadTrendChart();
+  }
+
+  // ========== Hosts table ==========
+  function renderHosts() {
+    const tbody = document.getElementById("ipHostsBody");
+    const empty = document.getElementById("ipHostsEmpty");
+    if (allHosts.length === 0) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+    empty.style.display = "none";
+
+    tbody.innerHTML = allHosts.map((h, i) => `
+      <tr class="ip-host-expand" onclick="toggleHostDetail(${i})">
+        <td><code class="wsa-mono">${esc(h.ip_address)}</code></td>
+        <td>${esc(h.hostname) || '<span class="wsa-cell-muted">-</span>'}</td>
+        <td><span class="wsa-cell-muted">${esc(h.os_detection) || '-'}</span></td>
+        <td><strong>${h.open_ports_count || 0}</strong></td>
+        <td>${h.service_count || h.services_count || 0}</td>
+        <td>${h.vulnerabilities_count || 0}</td>
+        <td><span class="ip-risk ${h.risk_level}">${(h.risk_level || 'none').toUpperCase()}</span></td>
+        <td><button class="btn btn-sm wsa-btn wsa-btn-ghost" onclick="event.stopPropagation();toggleHostDetail(${i})"><i class="bi bi-chevron-down"></i></button></td>
+      </tr>
+      <tr class="ip-host-detail" id="hostDetail${i}">
+        <td colspan="8">
+          <div class="ip-host-detail-inner">
+            <div class="ip-detail-group">
+              <h4><i class="bi bi-info-circle"></i> Host Details</h4>
+              <dl>
+                <div class="ip-detail-item"><dt>IP Address</dt><dd><code class="wsa-mono">${esc(h.ip_address)}</code></dd></div>
+                <div class="ip-detail-item"><dt>Hostname</dt><dd>${esc(h.hostname) || '-'}</dd></div>
+                <div class="ip-detail-item"><dt>OS</dt><dd>${esc(h.os_detection) || '-'}</dd></div>
+                <div class="ip-detail-item"><dt>MAC Address</dt><dd>${esc(h.mac_address) || '-'}</dd></div>
+                <div class="ip-detail-item"><dt>Status</dt><dd>${esc(h.status)}</dd></div>
+              </dl>
+            </div>
+            <div class="ip-detail-group">
+              <h4><i class="bi bi-door-open"></i> Open Ports & Services</h4>
+              ${renderHostPorts(h)}
+            </div>
+          </div>
+        </td>
+      </tr>
+    `).join("");
+  }
+
+  function renderHostPorts(host) {
+    const ports = (host.ports || []);
+    if (ports.length === 0) return '<span class="wsa-cell-muted">No open ports</span>';
+    return `<table class="wsa-table" style="font-size:12px;margin:0;">
+      <thead><tr><th>Port</th><th>Service</th><th>Version</th></tr></thead>
+      <tbody>${ports.map(p => `
+        <tr>
+          <td><code class="wsa-mono">${p.port_number}/${p.protocol}</code></td>
+          <td>${esc(p.service) || '-'}</td>
+          <td><code class="wsa-mono">${esc(p.version) || '-'}</code></td>
+        </tr>`).join('')}
+      </tbody></table>`;
+  }
+
+  window.toggleHostDetail = function(idx) {
+    const el = document.getElementById("hostDetail" + idx);
+    if (el) el.classList.toggle("open");
+  };
+
+  // ========== Ports table ==========
+  function renderPorts() {
+    const tbody = document.getElementById("ipPortsBody");
+    const empty = document.getElementById("ipPortsEmpty");
+    if (allPorts.length === 0) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+    empty.style.display = "none";
+
+    tbody.innerHTML = allPorts.map(p => {
+      // Find if there's a security finding for this port
+      const finding = allVulns.find(v => v.host_ip === p.host_ip && v.port === p.port_number);
+      return `<tr>
+        <td><code class="wsa-mono">${p.port_number}</code></td>
+        <td>${esc(p.protocol)}</td>
+        <td>${esc(p.service) || '-'}</td>
+        <td><code class="wsa-mono">${esc(p.version) || '-'}</code></td>
+        <td><code class="wsa-mono">${esc(p.host_ip)}</code></td>
+        <td><span class="wsa-status completed">${esc(p.state)}</span></td>
+        <td>${finding ? `<span class="ip-sev ${finding.severity}">${esc(finding.severity)}</span>` : '<span class="wsa-cell-muted">None</span>'}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ========== Vulnerabilities table ==========
+  function renderVulns() {
+    const tbody = document.getElementById("ipVulnsBody");
+    const empty = document.getElementById("ipVulnsEmpty");
+    const filtered = activeVulnFilter === "all" ? allVulns : allVulns.filter(v => v.vuln_type === activeVulnFilter);
+    if (filtered.length === 0) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+    empty.style.display = "none";
+
+    // Build type chips
+    const typeCounts = {};
+    allVulns.forEach(v => { typeCounts[v.vuln_type || "other"] = (typeCounts[v.vuln_type || "other"] || 0) + 1; });
+    const chipHtml = `<span class="ip-type-chip ${activeVulnFilter === 'all' ? 'active' : ''}" onclick="filterVulns('all')">All<span class="ip-chip-count">${allVulns.length}</span></span>` +
+      Object.entries(typeCounts).sort((a,b) => b[1]-a[1]).map(([type, count]) => {
+        const label = typeLabels[type] || type;
+        return `<span class="ip-type-chip ${activeVulnFilter === type ? 'active' : ''}" onclick="filterVulns('${type}')">${label}<span class="ip-chip-count">${count}</span></span>`;
+      }).join("");
+    document.getElementById("ipVulnTypeChips").innerHTML = chipHtml;
+
+    tbody.innerHTML = filtered.map(v => `<tr>
+      <td class="wsa-cell-strong">${esc(v.name)}</td>
+      <td><span class="wsa-pill">${esc(typeLabels[v.vuln_type] || v.vuln_type || '-')}</span></td>
+      <td><span class="ip-sev ${v.severity}">${esc(v.severity)}</span></td>
+      <td><code class="wsa-mono">${esc(v.host_ip) || '-'}</code></td>
+      <td><code class="wsa-mono">${v.port || '-'}</code></td>
+      <td>${esc(v.service) || '-'}</td>
+      <td><code class="wsa-mono">${esc(v.cve_id) || '-'}</code></td>
+      <td>${v.cvss_score != null ? `<strong>${v.cvss_score}</strong>` : '-'}</td>
+      <td><span class="wsa-status open">${esc(v.status)}</span></td>
+      <td><span class="wsa-truncate" title="${esc(v.evidence)}">${esc(truncate(v.evidence, 50)) || '-'}</span></td>
+      <td><span class="wsa-truncate" title="${esc(v.recommendation)}">${esc(truncate(v.recommendation, 50)) || '-'}</span></td>
+    </tr>`).join("");
+  }
+
+  const typeLabels = {
+    "open_ports": "Open/Exposed Ports",
+    "insecure_services": "Insecure Services",
+    "outdated_software": "Outdated Software",
+    "cve": "CVE-Based",
+    "ssl_tls": "SSL/TLS Weaknesses",
+    "misconfig": "Security Misconfiguration",
+    "auth_weakness": "Authentication Weaknesses",
+    "info_disclosure": "Information Disclosure",
+    "smb_issues": "SMB/Network-Service Issues",
+    "remote_service": "Remote-Service Vulns",
+    "os_host": "OS/Host Vulns",
+  };
+
+  window.filterVulns = function(type) {
+    activeVulnFilter = type;
+    renderVulns();
+  };
+
+  // ========== Distribution chart ==========
+  function renderDistChart() {
+    if (allVulns.length === 0) {
+      document.getElementById("ipDistChartWrap").style.display = "none";
+      document.getElementById("ipDistEmpty").style.display = "";
+      return;
+    }
+    document.getElementById("ipDistChartWrap").style.display = "";
+    document.getElementById("ipDistEmpty").style.display = "none";
+
+    // Group by host
+    const byHost = {};
+    allVulns.forEach(v => {
+      const ip = v.host_ip || "Unknown";
+      if (!byHost[ip]) byHost[ip] = { critical: 0, high: 0, medium: 0, low: 0, informational: 0 };
+      byHost[ip][v.severity] = (byHost[ip][v.severity] || 0) + 1;
+    });
+
+    const labels = Object.keys(byHost);
+    const datasets = ["critical", "high", "medium", "low", "informational"].map(sev => ({
+      label: sev.charAt(0).toUpperCase() + sev.slice(1),
+      data: labels.map(ip => byHost[ip][sev] || 0),
+      backgroundColor: sevColors[sev],
+    }));
+
+    if (distChart) distChart.destroy();
+    distChart = new Chart(document.getElementById("ipDistChart"), {
+      type: "bar",
+      data: { labels, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { position: "bottom", labels: { font: { size: 11, weight: 600 } } } },
+        scales: {
+          x: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+          y: { stacked: true, beginAtZero: true, grid: { color: "#f3f4f6" }, ticks: { font: { size: 11 }, stepSize: 1 } },
+        },
+      },
+    });
+  }
+
+  const sevColors = {
+    critical: "#dc2626", high: "#ea580c", medium: "#d97706", low: "#16a34a", informational: "#3b82f6",
+  };
+
+  // ========== Trend chart (across multiple scans) ==========
+  async function loadTrendChart() {
+    try {
+      const data = await WSA.api("/api/ip-scan/history?limit=20");
+      const scans = (data.scans || []).filter(s => s.status === "completed").reverse();
+      if (scans.length === 0) {
+        document.getElementById("ipTrendChartWrap").style.display = "none";
+        document.getElementById("ipTrendEmpty").style.display = "";
+        return;
+      }
+      document.getElementById("ipTrendChartWrap").style.display = "";
+      document.getElementById("ipTrendEmpty").style.display = "none";
+
+      const labels = scans.map(s => `Scan #${s.scan_number}`);
+      const vulnTypes = {};
+      // We need per-scan vuln counts by type — fetch from each scan's detail
+      // For efficiency, use the summary counts and create a single "vulnerabilities" series
+      const datasets = [
+        {
+          label: "Vulnerabilities",
+          data: scans.map(s => s.vulnerabilities_count || 0),
+          borderColor: "#1a56db", backgroundColor: "rgba(26,86,219,.1)",
+          fill: true, tension: 0.3,
+        },
+        {
+          label: "Critical",
+          data: scans.map(s => s.critical_count || 0),
+          borderColor: "#dc2626", backgroundColor: "rgba(220,38,38,.1)",
+          fill: false, tension: 0.3,
+        },
+        {
+          label: "High",
+          data: scans.map(s => s.high_count || 0),
+          borderColor: "#ea580c", backgroundColor: "rgba(234,88,12,.1)",
+          fill: false, tension: 0.3,
+        },
+        {
+          label: "Medium",
+          data: scans.map(s => s.medium_count || 0),
+          borderColor: "#d97706", backgroundColor: "rgba(217,119,6,.1)",
+          fill: false, tension: 0.3,
+        },
+      ].filter(ds => ds.data.some(v => v > 0));
+
+      if (trendChart) trendChart.destroy();
+      trendChart = new Chart(document.getElementById("ipTrendChart"), {
+        type: "line",
+        data: { labels, datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { position: "bottom", labels: { font: { size: 11, weight: 600 } } } },
+          scales: {
+            x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+            y: { beginAtZero: true, grid: { color: "#f3f4f6" }, ticks: { font: { size: 11 }, stepSize: 1 } },
+          },
+        },
+      });
+    } catch (err) {
+      console.error("Failed to load trend chart:", err);
+    }
+  }
+
+  // ========== Scan history ==========
+  async function loadHistory() {
+    try {
+      const data = await WSA.api("/api/ip-scan/history?limit=50");
+      renderHistory(data.scans || []);
+    } catch (err) {
+      console.error("Failed to load IP scan history:", err);
+    }
+  }
+
+  function renderHistory(scans) {
+    const tbody = document.getElementById("ipHistoryBody");
+    const empty = document.getElementById("ipHistoryEmpty");
+    if (scans.length === 0) { tbody.innerHTML = ""; empty.style.display = ""; return; }
+    empty.style.display = "none";
+
+    tbody.innerHTML = scans.map(s => `<tr>
+      <td><strong>#${s.scan_number}</strong></td>
+      <td><code class="wsa-mono">${esc(s.target)}</code></td>
+      <td>${fmtDT(s.created_at)}</td>
+      <td>${s.hosts_discovered || 0}</td>
+      <td>${s.open_ports_count || 0}</td>
+      <td>${s.services_detected || 0}</td>
+      <td>${s.vulnerabilities_count || 0}</td>
+      <td>${s.critical_count || 0}</td>
+      <td>${s.high_count || 0}</td>
+      <td>${s.medium_count || 0}</td>
+      <td>${s.low_count || 0}</td>
+      <td><span class="ip-history-badge ${s.status}">${s.status}</span></td>
+      <td>
+        ${s.status === 'completed' ? `<button class="btn btn-sm wsa-btn wsa-btn-ghost" onclick="viewScanResults(${s.id})"><i class="bi bi-eye"></i></button>` : ''}
+        <button class="btn btn-sm wsa-btn wsa-btn-danger" onclick="deleteScan(${s.id})"><i class="bi bi-trash"></i></button>
+      </td>
+    </tr>`).join("");
+  }
+
+  window.viewScanResults = function(scanId) {
+    currentScanId = scanId;
+    loadResults(scanId);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  window.deleteScan = async function(scanId) {
+    if (!confirm("Delete this IP scan and all its results?")) return;
+    try {
+      await WSA.api(`/api/ip-scan/${scanId}`, { method: "DELETE" });
+      WSA.toast("Scan deleted.", "success");
+      loadHistory();
+    } catch (err) {
+      WSA.toast(err.message, "error");
+    }
+  };
+
+  // ========== Socket.IO live updates ==========
+  function setupSocketListeners() {
+    if (typeof io === "undefined") return;
+    try {
+      const sock = io({ transports: ["websocket", "polling"], timeout: 6000 });
+      sock.on("ip_scan_started", (d) => {
+        if (d.scan_id === currentScanId) {
+          document.getElementById("ipActiveScan").style.display = "";
+        }
+        loadHistory();
+      });
+      sock.on("ip_scan_progress", (d) => {
+        if (d.scan_id === currentScanId) {
+          document.getElementById("ipActiveProgress").style.width = (d.progress || 0) + "%";
+          // Refresh scan data periodically
+          if (d.progress % 10 === 0) refreshCurrentScan();
+        }
+      });
+      sock.on("ip_scan_completed", (d) => {
+        if (d.scan_id === currentScanId) {
+          loadResults(d.scan_id);
+        }
+        loadHistory();
+      });
+    } catch (e) { /* socket unavailable */ }
+  }
+
+  async function refreshCurrentScan() {
+    if (!currentScanId) return;
+    try {
+      const data = await WSA.api(`/api/ip-scan/${currentScanId}`);
+      if (data.scan) updateActiveScan(data.scan);
+    } catch (e) { /* ignore */ }
+  }
+
+  // ========== Helpers ==========
+  function esc(s) { const d = document.createElement("div"); d.textContent = s || ""; return d.innerHTML; }
+  function truncate(s, n) { s = s || ""; return s.length > n ? s.slice(0, n - 1) + "…" : s; }
+  function fmtDT(iso) { if (!iso) return "-"; return new Date(iso).toLocaleString(); }
+  function timeDiff(iso) {
+    if (!iso) return "";
+    const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+    if (s < 60) return s + "s";
+    if (s < 3600) return Math.floor(s/60) + "m " + (s%60) + "s";
+    return Math.floor(s/3600) + "h " + Math.floor((s%3600)/60) + "m";
+  }
+
+  // ========== Init ==========
+  document.addEventListener("DOMContentLoaded", () => {
+    loadHistory();
+    setupSocketListeners();
+
+    // Deep link from the Findings page: open a specific scan's results
+    const params = new URLSearchParams(location.search);
+    const scanParam = parseInt(params.get("scan"), 10);
+    if (scanParam) {
+      currentScanId = scanParam;
+      loadResults(scanParam);
+      return;
+    }
+
+    // Check for any running scan
+    WSA.api("/api/ip-scan?limit=1").then(data => {
+      const scans = data.scans || [];
+      if (scans.length > 0 && (scans[0].status === "running" || scans[0].status === "pending")) {
+        currentScanId = scans[0].id;
+        showActiveScan(scans[0]);
+      } else if (scans.length > 0 && scans[0].status === "completed") {
+        loadResults(scans[0].id);
+      }
+    }).catch(() => {});
+  });
+
+})();
+</script>
+{% endblock %}

@@ -4,11 +4,13 @@ from flask import Blueprint, current_app, jsonify
 from ..extensions import db
 from ..models import ToolIntegration
 from ..services.tool_checker import check_all
+from ._api_guard import api_login_required
 
 bp = Blueprint("tools", __name__, url_prefix="/api/tools")
 
 
 @bp.get("")
+@api_login_required
 def list_tools():
     try:
         results = check_all(current_app)
@@ -19,6 +21,7 @@ def list_tools():
 
 
 @bp.post("/test")
+@api_login_required
 def test_all():
     try:
         results = check_all(current_app)

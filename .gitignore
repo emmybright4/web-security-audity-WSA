@@ -14,6 +14,7 @@ venv/
 *.db
 *.sqlite
 *.sqlite3
+*.bak
 instance/
 
 # Generated reports
@@ -27,6 +28,9 @@ testsite/
 Thumbs.db
 .vscode/
 .idea/
+
+# Local engine binaries (ZAP, Nuclei, gosqli, bundled JRE)
+tools/
 
 # Logs
 *.log

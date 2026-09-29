@@ -1,12 +1,13 @@
 """Dashboard API: live statistics from the database. No hardcoded values."""
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from flask import Blueprint, jsonify, request
-from sqlalchemy import func
+from sqlalchemy import and_, func
 
 from ..extensions import db
 from ..models import Scan, Vulnerability
+from ._api_guard import api_login_required
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 
@@ -42,7 +43,12 @@ TYPE_BUCKETS = [
     ("sql_injection", "SQL Injection",
      ("sql", "sql injection", "blind injection")),
     ("xss", "Cross-Site Scripting (XSS)",
-     ("xss", "cross-site scripting", "script injection")),
+     ("xss", "cross-site scripting", "script injection", "reflected",
+      "stored xss", "dom-based")),
+    ("mitm", "Man-in-the-Middle",
+     ("man-in-the-middle", "mitm", "mitm attack", "ssl stripping",
+      "downgrade attack", "intercept", "ssl/tls interception",
+      "ssl stripping attack", "insecure transport")),
     ("missing_headers", "Missing Security Headers",
      ("header", "csp", "content-security-policy", "hsts", "strict-transport",
       "x-frame", "clickjacking", "referrer-policy", "permissions-policy",
@@ -61,6 +67,10 @@ TYPE_BUCKETS = [
 MAX_TYPES = 10          # top N vulnerability types on the chart...
 MAX_DATES = 90          # ...and max distinct dates returned
 GRANS = ("day", "week", "month")
+
+# The delta shown next to each stat card compares the most recent N days with
+# the N days immediately before them.
+TREND_WINDOW_DAYS = 7
 
 
 def _gran_key(d_str, gran):
@@ -112,6 +122,7 @@ def _severity_counts(query_filter=None):
 
 
 @bp.get("/summary")
+@api_login_required
 def summary():
     """Live totals + comparison with the previous equivalent period."""
     try:
@@ -121,23 +132,28 @@ def summary():
         counts = _grouped_counts()
         total_findings = sum(counts.values())
 
-        # previous-period comparison (period = span between first and last scan,
-        # or last 7 days when history is too short)
+        # Period-over-period comparison: the most recent TREND_WINDOW_DAYS days
+        # against the TREND_WINDOW_DAYS days immediately before them. (Splitting
+        # the whole history at its mid point produced figures like "+1700%".)
         trend = {"total_scans": None, "high": None, "medium": None, "low": None}
-        first = db.session.query(func.min(Scan.created_at)).scalar()
-        last = db.session.query(func.max(Scan.created_at)).scalar()
-        if first and last and first < last:
-            span = (last - first) / 2
-            mid = first + span
-            old_scans = db.session.query(func.count(Scan.id)).filter(
-                Scan.created_at < mid).scalar() or 0
-            new_scans = total_scans_all - old_scans
-            trend["total_scans"] = _pct(old_scans, new_scans)
+        newest = db.session.query(func.max(Scan.created_at)).scalar()
+        if newest:
+            recent_start = newest - timedelta(days=TREND_WINDOW_DAYS)
+            previous_start = recent_start - timedelta(days=TREND_WINDOW_DAYS)
 
-            old_counts = _grouped_counts(Vulnerability.created_at < mid)
-            new_counts_total = total_findings - sum(old_counts.values())
+            recent_scans = db.session.query(func.count(Scan.id)).filter(
+                Scan.created_at >= recent_start).scalar() or 0
+            previous_scans = db.session.query(func.count(Scan.id)).filter(
+                and_(Scan.created_at >= previous_start,
+                     Scan.created_at < recent_start)).scalar() or 0
+            trend["total_scans"] = _pct(previous_scans, recent_scans)
+
+            recent_counts = _grouped_counts(Vulnerability.created_at >= recent_start)
+            previous_counts = _grouped_counts(
+                and_(Vulnerability.created_at >= previous_start,
+                     Vulnerability.created_at < recent_start))
             for g in ("high", "medium", "low"):
-                trend[g] = _pct(old_counts[g], counts[g] - old_counts[g])
+                trend[g] = _pct(previous_counts[g], recent_counts[g])
 
         spark = _sparklines()
         return jsonify(
@@ -160,6 +176,7 @@ def summary():
 
 
 @bp.get("/findings-overview")
+@api_login_required
 def findings_overview():
     """Live severity distribution (critical kept separate from high)."""
     try:
@@ -171,6 +188,7 @@ def findings_overview():
 
 
 @bp.get("/vulnerability-trend")
+@api_login_required
 def vulnerability_trend():
     """Findings per day, grouped by real vulnerability types or by severity.
 
@@ -201,16 +219,34 @@ def vulnerability_trend():
             return jsonify(mode=mode, days=days, gran=gran, dates=[], series=[],
                            totals={}, empty=True)
 
-        # Collapse raw dates into day/week/month buckets before anything else.
+        # Collapse raw rows into day/week/month buckets.
         bucketed = defaultdict(list)
         for d, name, sev in rows:
             if d:
                 bucketed[_gran_key(str(d), gran)].append((name, sev))
-        dates = sorted(bucketed)
+
+        # The axis spans the *whole* requested range, including the days that
+        # hold no findings. Without this, an install that scanned only today
+        # returned a single date: every series became one lone point, which
+        # Chart.js renders as isolated dots rather than a line. The zero-filled
+        # gaps are honest - "no findings that day" is exactly what happened.
+        present = sorted({str(r[0]) for r in rows if r[0]})
+        today = datetime.now(timezone.utc).date()   # rows are UTC; SQLite date('now') is UTC
+        if days > 0:
+            start, end = today - timedelta(days=days), today   # same bound as the filter
+        else:
+            start = date.fromisoformat(present[0][:10])
+            end = max(date.fromisoformat(present[-1][:10]), today)
+            if (end - start).days < 6:              # keep the all-time view readable
+                start = end - timedelta(days=6)
+        span = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+        dates = sorted({_gran_key(d.isoformat(), gran) for d in span})
         if len(dates) > MAX_DATES:
             dates = dates[-MAX_DATES:]
-            keep = set(dates)
-            bucketed = {k: v for k, v in bucketed.items() if k in keep}
+        keep = set(dates)
+        bucketed = {k: v for k, v in bucketed.items() if k in keep}
+        for d in dates:
+            bucketed.setdefault(d, [])              # every bucket exists, most are zero
 
         by_date = defaultdict(lambda: defaultdict(int))
         totals = defaultdict(int)
@@ -262,7 +298,95 @@ def vulnerability_trend():
         return jsonify(error=f"Failed to compute trend: {exc}"), 500
 
 
+# ------------------------------------------------------------- live findings ----
+# Rolling window for the dashboard's live chart. Minute buckets make a running
+# scan visibly move the line; the longer windows give the same panel a wide view.
+LIVE_WINDOWS = {
+    # window: (bucket seconds, number of buckets)
+    "hour": (60, 60),           # last 60 minutes -> one point per minute
+    "day": (900, 96),           # last 24 hours   -> one point per 15 minutes
+    "30d": (86400, 30),         # last 30 days    -> one point per day
+}
+LIVE_MAX_SERIES = 6             # keep the live panel readable
+
+
+def _bucket_start(dt, seconds):
+    """Align a naive-UTC timestamp to the start of its bucket."""
+    if seconds >= 86400:                              # day buckets
+        return dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    minutes = max(1, seconds // 60)
+    return dt.replace(minute=(dt.minute // minutes) * minutes, second=0, microsecond=0)
+
+
+@bp.get("/live-trend")
+@api_login_required
+def live_trend():
+    """Findings per category over a rolling window - the live dashboard chart.
+
+    Query params:
+      window=hour|day|30d   (default hour)
+
+    Only real rows are plotted. The buckets always end at "now", so a finding
+    written a second ago already shows up in the newest point, and a category
+    that stops producing findings falls away honestly as the window rolls on.
+    """
+    try:
+        window = (request.args.get("window") or "hour").lower()
+        if window not in LIVE_WINDOWS:
+            window = "hour"
+        bucket_seconds, bucket_count = LIVE_WINDOWS[window]
+
+        # Rows store naive UTC (models.utcnow), so the cutoff is naive UTC too.
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+        current = _bucket_start(now, bucket_seconds)
+        buckets = [current - timedelta(seconds=bucket_seconds * i)
+                   for i in range(bucket_count - 1, -1, -1)]
+        start = buckets[0]
+
+        rows = (db.session.query(Vulnerability.created_at, Vulnerability.name)
+                .filter(Vulnerability.created_at >= start).all())
+
+        index = {b: i for i, b in enumerate(buckets)}
+        counts = defaultdict(lambda: defaultdict(int))
+        labels = {}
+        totals = defaultdict(int)
+        for created_at, name in rows:
+            if not created_at:
+                continue
+            pos = index.get(_bucket_start(created_at, bucket_seconds))
+            if pos is None:                           # outside the window
+                continue
+            key, label = _type_bucket(name)
+            counts[key][pos] += 1
+            totals[key] += 1
+            labels[key] = label
+
+        ordered = sorted(totals.items(), key=lambda kv: kv[1], reverse=True)
+        kept = ordered[:LIVE_MAX_SERIES]
+        series = [{"key": key, "label": labels[key], "total": totals[key],
+                   "data": [counts[key].get(i, 0) for i in range(len(buckets))]}
+                  for key, _ in kept]
+        events = sum(totals.values())
+        scanning = db.session.query(Scan.id).filter(
+            Scan.status.in_((["pending", "running"]))).first() is not None
+
+        return jsonify(
+            window=window,
+            bucket_seconds=bucket_seconds,
+            buckets=[b.replace(tzinfo=timezone.utc).isoformat() for b in buckets],
+            series=series,
+            events=events,
+            omitted=max(0, len(ordered) - len(kept)),
+            scanning=scanning,
+            generated_at=now.replace(tzinfo=timezone.utc).isoformat(),
+            empty=not series,
+        )
+    except Exception as exc:
+        return jsonify(error=f"Failed to compute live trend: {exc}"), 500
+
+
 @bp.get("/sparklines")
+@api_login_required
 def sparklines_endpoint():
     try:
         return jsonify(sparklines=_sparklines())
@@ -287,7 +411,11 @@ def _sparklines():
 
 
 def _pct(old, new):
-    """Percentage change old -> new; None when undefined."""
-    if old == 0:
-        return None if new == 0 else 100.0
+    """Percentage change old -> new.
+
+    Returns None when there is no baseline to compare against, so the UI shows
+    "—" rather than a fabricated 100% increase over zero.
+    """
+    if not old:
+        return None
     return round(100.0 * (new - old) / old, 1)

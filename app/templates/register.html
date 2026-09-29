@@ -1,0 +1,253 @@
+{% extends "base.html" %}
+{% block content %}{% endblock %}
+
+{% block auth %}
+<style>
+  body { overflow-x: hidden; }
+  .wsa-shell { display: none !important; }
+</style>
+
+<div class="auth-shell">
+  <!-- ============ Brand panel ============ -->
+  <div class="auth-brand">
+    <div class="auth-brand-inner">
+      <div class="auth-logo"><i class="bi bi-shield-shaded"></i></div>
+      <h1>WSA</h1>
+      <p class="auth-tagline">Web Security Auditing</p>
+      <p class="auth-desc">Create your account with an email address or a phone number.
+        We send a 6-digit code to confirm you own it.</p>
+
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-envelope-check"></i></span>
+        <div><b>Verified contacts only</b><span>Email and SMS alerts only to channels you prove</span></div>
+      </div>
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-shield-lock"></i></span>
+        <div><b>Your private workspace</b><span>Findings, scans and reports stay in your account</span></div>
+      </div>
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-lightning-charge"></i></span>
+        <div><b>Fast setup</b><span>No configuration needed for the built-in scanner</span></div>
+      </div>
+    </div>
+    <div class="auth-brand-glow g1"></div>
+    <div class="auth-brand-glow g2"></div>
+  </div>
+
+  <!-- ============ Form panel ============ -->
+  <div class="auth-panel">
+    <div class="auth-card">
+      <h2>Create your WSA account</h2>
+      <p class="auth-sub">Sign up using your email address or your phone number.</p>
+
+      <div class="auth-error" id="authError" hidden>
+        <i class="bi bi-exclamation-octagon"></i><span></span>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button type="button" class="auth-tab active" data-channel="email" role="tab">
+          <i class="bi bi-envelope"></i> Email
+        </button>
+        <button type="button" class="auth-tab" data-channel="phone" role="tab">
+          <i class="bi bi-phone"></i> Phone
+        </button>
+      </div>
+
+      <form id="registerForm" novalidate>
+        <input type="hidden" id="channel" value="email">
+
+        <div id="panelEmail">
+          <label class="wsa-label" for="email">Email Address</label>
+          <div class="auth-field">
+            <i class="bi bi-envelope"></i>
+            <input id="email" type="email" autocomplete="email" placeholder="user@example.com">
+          </div>
+        </div>
+
+        <div id="panelPhone" hidden>
+          <label class="wsa-label" for="country">Country</label>
+          <div class="auth-field">
+            <i class="bi bi-globe2"></i>
+            <select id="country" autocomplete="country">
+              {% for iso, dial, label in countries %}
+              <option value="{{ iso }}" data-dial="{{ dial }}"
+                {{ 'selected' if iso == default_country }}>{{ label }} ({{ dial }})</option>
+              {% endfor %}
+            </select>
+          </div>
+          <label class="wsa-label" for="phone">Phone Number</label>
+          <div class="auth-field">
+            <i class="bi bi-phone"></i>
+            <input id="phone" type="tel" inputmode="tel" autocomplete="tel-national"
+                   placeholder="7XX XXX XXX" disabled>
+          </div>
+          <div class="wsa-hint" id="phonePreview"></div>
+        </div>
+
+        <label class="wsa-label" for="username">Full name <span class="auth-optional">(optional)</span></label>
+        <div class="auth-field">
+          <i class="bi bi-person"></i>
+          <input id="username" type="text" autocomplete="name" placeholder="e.g. Emmy Bright">
+        </div>
+
+        <label class="wsa-label" for="password">Password</label>
+        <div class="auth-field">
+          <i class="bi bi-lock"></i>
+          <input id="password" type="password" autocomplete="new-password"
+                 placeholder="Min. 8 characters, letters + numbers" required>
+          <button type="button" class="auth-eye" data-target="password" aria-label="Show password">
+            <i class="bi bi-eye"></i>
+          </button>
+        </div>
+
+        <label class="wsa-label" for="confirm">Confirm Password</label>
+        <div class="auth-field">
+          <i class="bi bi-lock-fill"></i>
+          <input id="confirm" type="password" autocomplete="new-password"
+                 placeholder="Repeat password" required>
+        </div>
+
+        <div class="auth-strength" id="strengthBox" hidden>
+          <div class="auth-strength-bar"><span id="strengthBar"></span></div>
+          <span id="strengthLabel"></span>
+        </div>
+
+        <label class="auth-remember">
+          <input type="checkbox" id="accept"> I agree to the Terms and Privacy Policy
+        </label>
+
+        <button type="submit" class="auth-submit" id="registerBtn">
+          <span class="auth-spinner" hidden></span>
+          <i class="bi bi-person-plus"></i> Create Account
+        </button>
+      </form>
+
+      <p class="auth-switch">Already have an account?
+        <a href="{{ url_for('auth.login_page') }}">Sign in</a>
+      </p>
+    </div>
+    <p class="auth-legal"><i class="bi bi-shield-check"></i> WSA is for authorized security auditing — never test systems without permission.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+
+  function showError(msg) {
+    const box = $("authError");
+    box.querySelector("span").textContent = msg;
+    box.hidden = false;
+  }
+
+  // ---------- channel tabs ----------
+  let channel = "email";
+  function setChannel(next) {
+    channel = next;
+    $("channel").value = next;
+    document.querySelectorAll(".auth-tab").forEach((t) =>
+      t.classList.toggle("active", t.dataset.channel === next));
+    $("panelEmail").hidden = next !== "email";
+    $("panelPhone").hidden = next !== "phone";
+    $("email").disabled = next !== "email";
+    $("phone").disabled = next !== "phone";
+    $("email").required = next === "email";
+    $("phone").required = next === "phone";
+    $("authError").hidden = true;
+    updatePhonePreview();
+  }
+
+  document.querySelectorAll(".auth-tab").forEach((tab) => {
+    tab.addEventListener("click", () => setChannel(tab.dataset.channel));
+  });
+
+  // Show the international form before submitting, so the number is unambiguous.
+  function updatePhonePreview() {
+    const opt = $("country").selectedOptions[0];
+    const digits = $("phone").value.replace(/[^\d+]/g, "");
+    const dial = (opt && opt.dataset.dial) || "+";
+    if (!digits) { $("phonePreview").textContent = "Stored as an international number, e.g. " + dial + "788123456"; return; }
+    let local = digits.startsWith("+") ? "+" + digits.slice(1).replace(/^0+/, "") : digits.replace(/^0+/, "");
+    $("phonePreview").textContent = "Will be stored as " + dial + local;
+  }
+  $("phone").addEventListener("input", updatePhonePreview);
+  $("country").addEventListener("change", updatePhonePreview);
+
+  // ---------- password visibility ----------
+  document.querySelectorAll(".auth-eye").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const input = $(btn.dataset.target);
+      const show = input.type === "password";
+      input.type = show ? "text" : "password";
+      btn.innerHTML = `<i class="bi bi-eye${show ? "-slash" : ""}"></i>`;
+    });
+  });
+
+  // ---------- password strength ----------
+  $("password").addEventListener("input", () => {
+    const v = $("password").value;
+    let score = 0;
+    if (v.length >= 8) score++;
+    if (v.length >= 12) score++;
+    if (/[A-Z]/.test(v) && /[a-z]/.test(v)) score++;
+    if (/\d/.test(v)) score++;
+    if (/[^A-Za-z0-9]/.test(v)) score++;
+    const box = $("strengthBox");
+    if (!v) { box.hidden = true; return; }
+    box.hidden = false;
+    const levels = [
+      ["20%", "Weak", "#dc2626"],
+      ["40%", "Fair", "#f59e0b"],
+      ["60%", "Good", "#0ea5e9"],
+      ["80%", "Strong", "#16a34a"],
+      ["100%", "Excellent", "#15803d"],
+    ][Math.max(0, score - 1)];
+    $("strengthBar").style.width = levels[0];
+    $("strengthBar").style.background = levels[2];
+    $("strengthLabel").textContent = levels[1];
+    $("strengthLabel").style.color = levels[2];
+  });
+
+  $("registerForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("authError").hidden = true;
+
+    if (!$("accept").checked) { showError("Please accept the Terms and Privacy Policy."); return; }
+    if ($("password").value !== $("confirm").value) { showError("Passwords do not match."); return; }
+
+    const body = {
+      channel: channel,
+      username: $("username").value.trim(),
+      password: $("password").value,
+      confirm_password: $("confirm").value,
+    };
+    if (channel === "email") {
+      body.email = $("email").value.trim();
+      if (!body.email) { showError("Enter your email address."); return; }
+    } else {
+      body.phone_number = $("phone").value.trim();
+      body.country = $("country").value;
+      if (!body.phone_number) { showError("Enter your phone number."); return; }
+    }
+
+    const btn = $("registerBtn");
+    btn.disabled = true;
+    btn.querySelector(".auth-spinner").hidden = false;
+    try {
+      const d = await WSA.api("/api/auth/register", { method: "POST", body: JSON.stringify(body) });
+      // With verification on, the account is not usable yet: the backend sends a
+      // 6-digit code and the verification screen collects it. With verification
+      // off it answers with the dashboard - and the account is signed in.
+      location.href = d.next || "/verify";
+    } catch (err) {
+      showError(err.message);
+      btn.disabled = false;
+      btn.querySelector(".auth-spinner").hidden = true;
+    }
+  });
+
+  setChannel("email");
+})();
+</script>
+{% endblock %}

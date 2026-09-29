@@ -66,13 +66,28 @@
         <a class="btn btn-primary wsa-btn-new" href="{{ url_for('main.new_scan') }}">
           <i class="bi bi-plus-lg"></i> New Scan
         </a>
-        <div class="wsa-user">
-          <div class="wsa-avatar">EB</div>
+        {% if current_user.is_authenticated %}
+        <div class="wsa-user" id="wsaUserMenu">
+          <div class="wsa-avatar">{{ user_initials }}</div>
           <div class="wsa-user-meta d-none d-md-block">
-            <div class="wsa-user-name">Emmy Bright</div>
-            <div class="wsa-user-role">IT Student</div>
+            <div class="wsa-user-name">{{ user_name }}</div>
+            <div class="wsa-user-role">{{ user_role }}</div>
+          </div>
+          <i class="bi bi-chevron-down wsa-user-caret"></i>
+          <div class="wsa-user-dropdown" id="wsaUserDropdown" hidden>
+            <div class="wsa-user-drop-head">
+              <div class="wsa-avatar wsa-avatar-lg">{{ user_initials }}</div>
+              <div>
+                <div class="wsa-user-drop-name">{{ user_name }}</div>
+                <div class="wsa-user-drop-mail">{{ user_email }}</div>
+              </div>
+            </div>
+            <button type="button" class="wsa-user-drop-item" id="wsaSignOut">
+              <i class="bi bi-box-arrow-right"></i> Sign out
+            </button>
           </div>
         </div>
+        {% endif %}
       </div>
     </header>
 
@@ -94,5 +109,6 @@
 <script>window.WSA_POLL_SECONDS = {{ config.POLLING_FALLBACK_SECONDS if config else 4 }};</script>
 <script src="{{ url_for('static', filename='js/wsa.js') }}"></script>
 {% block scripts %}{% endblock %}
+{% block auth %}{% endblock %}
 </body>
 </html>

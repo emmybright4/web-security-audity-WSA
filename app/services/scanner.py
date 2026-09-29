@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 
 from ..extensions import db, socketio
 from ..models import Vulnerability
+from . import notification_service
 from .engines import (builtin_scanner, nuclei_service, playwright_service, sqli_service,
                       zap_service)
 
@@ -31,8 +32,17 @@ def is_cancelled(scan_id):
 
 
 def request_cancel(scan_id):
+    """Flag a *running* scan for cancellation.
+
+    Only a scan with a live worker thread is flagged. The flag is cleared by
+    that thread when it exits, so flagging an idle or already-finished scan
+    would leave a stale entry behind -- and SQLite reuses the primary key of a
+    deleted row, so the *next* scan could inherit the flag and be cancelled the
+    moment it starts.
+    """
     with _lock:
-        _cancellations.add(scan_id)
+        if scan_id in _scan_threads:
+            _cancellations.add(scan_id)
 
 
 def _emit(event, payload):
@@ -40,6 +50,14 @@ def _emit(event, payload):
         socketio.emit(event, payload)
     except Exception as exc:  # socket down is never fatal
         log.debug("emit %s failed: %s", event, exc)
+
+
+def _notify(fn, *args):
+    """Fire a notification; delivery problems never affect scan state."""
+    try:
+        fn(*args)
+    except Exception as exc:
+        log.warning("notification %s failed: %s", getattr(fn, "__name__", fn), exc)
 
 
 def start_scan(app, scan_id):
@@ -69,6 +87,12 @@ def _run_scan(app, scan_id):
     from ..models import Scan
     scan = db.session.get(Scan, scan_id)
     if scan is None:
+        # The row was deleted before this worker got to it. Release the
+        # bookkeeping now: nobody else clears it, and a leftover cancellation
+        # flag would cancel the next scan that reuses this id.
+        with _lock:
+            _scan_threads.pop(scan_id, None)
+            _cancellations.discard(scan_id)
         return
 
     options = scan.options or {}
@@ -146,6 +170,10 @@ def _run_scan(app, scan_id):
                     "scan_id": scan_id, "id": v.id, "name": v.name, "severity": v.severity,
                     "detected_by": v.detected_by, "url": v.url or v.target_url,
                 })
+                if str(v.severity or "").lower() in ("critical", "high"):
+                    # Alert only for a finding that is really stored, using its
+                    # own severity, CVE/CVSS fields and scan.
+                    _notify(notification_service.notify_critical_vulnerability, v)
 
         if is_cancelled(scan_id):
             raise _Cancelled()
@@ -155,6 +183,7 @@ def _run_scan(app, scan_id):
                   current_step="Scan completed",
                   completed_at=datetime.now(timezone.utc))
         counts = fresh.severity_counts()
+        _notify(notification_service.notify_scan_completed, fresh)
         _emit("scan_completed", {
             "scan_id": scan_id, "status": "completed", "progress": 100,
             "target_url": target, "findings_count": inserted, **counts,
@@ -173,6 +202,8 @@ def _run_scan(app, scan_id):
         _set_scan(fresh, status="failed", current_step="Scan failed",
                   error_message=str(exc)[:1000],
                   completed_at=datetime.now(timezone.utc))
+        # The status is already committed above; the alert only reports it.
+        _notify(notification_service.notify_scan_failed, fresh)
         _emit("scan_completed", {"scan_id": scan_id, "status": "failed",
                                  "target_url": target, "error": str(exc)[:300],
                                  "findings_count": inserted})

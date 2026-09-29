@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block content %}{% endblock %}
+
+{% block auth %}
+<style>
+  body { overflow-x: hidden; }
+  .wsa-shell { display: none !important; }
+</style>
+
+<div class="auth-shell">
+  <div class="auth-brand">
+    <div class="auth-brand-inner">
+      <div class="auth-logo"><i class="bi bi-shield-shaded"></i></div>
+      <h1>WSA</h1>
+      <p class="auth-tagline">Web Security Auditing</p>
+      {% if purpose == 'login_verification' %}
+      <p class="auth-desc">We emailed you a single-use code to confirm it is really you before
+        your workspace opens.</p>
+      {% else %}
+      <p class="auth-desc">One last step. Enter the {{ otp_length }}-digit code we sent so we
+        know this contact really belongs to you.</p>
+      {% endif %}
+
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-clock-history"></i></span>
+        <div><b>Codes expire</b><span>Expired codes are never accepted — request a new one</span></div>
+      </div>
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-shield-exclamation"></i></span>
+        <div><b>Attempt limit</b><span>Five wrong guesses locks the code</span></div>
+      </div>
+      <div class="auth-feature">
+        <span class="auth-feat-icon"><i class="bi bi-key"></i></span>
+        <div><b>Never shared</b><span>WSA staff will never ask you for this code</span></div>
+      </div>
+    </div>
+    <div class="auth-brand-glow g1"></div>
+    <div class="auth-brand-glow g2"></div>
+  </div>
+
+  <div class="auth-panel">
+    <div class="auth-card">
+      <h2>{{ 'Finish signing in' if purpose == 'login_verification' else 'Verify your account' }}</h2>
+      {% set code_label = 'sign-in' if purpose == 'login_verification' else 'verification' %}
+      {% if channel == 'phone' %}
+        <p class="auth-sub">We've sent a {{ otp_length }}-digit {{ code_label }} code to:</p>
+        <div class="verify-dest"><i class="bi bi-phone"></i> {{ destination }}</div>
+      {% elif channel == 'email' %}
+        <p class="auth-sub">We've sent a {{ otp_length }}-digit {{ code_label }} code to:</p>
+        <div class="verify-dest"><i class="bi bi-envelope"></i> {{ destination }}</div>
+      {% else %}
+        <p class="auth-sub">{{ 'If an account exists for this information, a verification code has been sent.' }}</p>
+      {% endif %}
+
+      {% if dev_mailbox %}
+      <div class="auth-note auth-note-dev">
+        <i class="bi bi-hdd-stack"></i>
+        <span>Development mail mode: no SMTP server is configured, so this message was
+          written to <code>{{ dev_mailbox }}</code>. Open the newest <code>.eml</code> file
+          there to read the code, or set <code>MAIL_SERVER</code> in <code>.env</code> to
+          receive real email.</span>
+      </div>
+      {% endif %}
+
+      <div class="auth-error" id="authError" hidden>
+        <i class="bi bi-exclamation-octagon"></i><span></span>
+      </div>
+      <div class="auth-success" id="authOk" hidden>
+        <i class="bi bi-check-circle"></i><span></span>
+      </div>
+
+      <form id="verifyForm" novalidate>
+        <label class="wsa-label" for="code0">Enter verification code</label>
+        <div class="otp-inputs" id="otpInputs" data-length="{{ otp_length }}" data-channel="{{ channel or '' }}">
+          {% for i in range(otp_length) %}
+          <input class="otp-digit" id="code{{ i }}" type="text" inputmode="numeric"
+                 autocomplete="{{ 'one-time-code' if i == 0 else 'off' }}" maxlength="1"
+                 aria-label="Digit {{ i + 1 }}"{% if not channel %} disabled{% endif %}>
+          {% endfor %}
+        </div>
+
+        <button type="submit" class="auth-submit" id="verifyBtn"{% if not channel %} disabled{% endif %}>
+          <span class="auth-spinner" hidden></span>
+          <i class="bi bi-shield-check"></i> Verify
+        </button>
+      </form>
+
+      <div class="verify-meta">
+        <div class="verify-countdown" id="expiryRow"{% if not expires_in %} hidden{% endif %}>
+          <i class="bi bi-hourglass-split"></i> Code expires in <b id="expiryTimer">{{ '%02d:%02d' % (expires_in // 60, expires_in % 60) }}</b>
+        </div>
+        <div class="verify-resend">
+          <span>Didn't receive the code?</span>
+          <button type="button" class="wsa-btn wsa-btn-ghost" id="resendBtn"{% if not channel %} disabled{% endif %}>
+            <i class="bi bi-arrow-repeat"></i> <span id="resendLabel">Resend Code</span>
+          </button>
+        </div>
+      </div>
+
+      <p class="auth-switch">
+        <a href="{{ url_for('auth.login_page') }}">Back to sign in</a>
+      </p>
+    </div>
+    <p class="auth-legal"><i class="bi bi-shield-check"></i> Authorized testing only — scan only systems you own or have permission to test.</p>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  const $ = (id) => document.getElementById(id);
+  const wrap = $("otpInputs");
+  const length = Number(wrap.dataset.length || 6);
+  const channel = wrap.dataset.channel || null;
+  const digits = Array.from(wrap.querySelectorAll(".otp-digit"));
+
+  function showError(msg) {
+    const box = $("authError");
+    box.querySelector("span").textContent = msg;
+    box.hidden = false;
+    $("authOk").hidden = true;
+  }
+  function showOk(msg) {
+    const box = $("authOk");
+    box.querySelector("span").textContent = msg;
+    box.hidden = false;
+    $("authError").hidden = true;
+  }
+
+  // ---------- focus, backspace, paste ----------
+  digits.forEach((input, index) => {
+    input.addEventListener("input", () => {
+      // A pasted 6-digit code lands in the first box: spread it out.
+      const raw = input.value.replace(/\D/g, "");
+      if (raw.length > 1) {
+        raw.split("").slice(0, length).forEach((d, i) => {
+          if (digits[i]) digits[i].value = d;
+        });
+        const next = Math.min(raw.length, length - 1);
+        digits[next].focus();
+        return;
+      }
+      input.value = raw.slice(-1);
+      if (raw && index < length - 1) digits[index + 1].focus();
+    });
+
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Backspace" && !input.value && index > 0) {
+        digits[index - 1].value = "";
+        digits[index - 1].focus();
+      }
+      if (e.key === "ArrowLeft" && index > 0) digits[index - 1].focus();
+      if (e.key === "ArrowRight" && index < length - 1) digits[index + 1].focus();
+    });
+
+    input.addEventListener("paste", (e) => {
+      e.preventDefault();
+      const text = (e.clipboardData || window.clipboardData).getData("text").replace(/\D/g, "");
+      if (!text) return;
+      text.slice(0, length).split("").forEach((d, i) => { digits[i].value = d; });
+      digits[Math.min(text.length, length - 1)].focus();
+    });
+
+    input.addEventListener("focus", () => input.select());
+  });
+
+  const code = () => digits.map((d) => d.value).join("");
+
+  // ---------- verify ----------
+  $("verifyForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("authError").hidden = true;
+    if (code().length !== length) { showError("Enter all " + length + " digits of the code."); return; }
+
+    const btn = $("verifyBtn");
+    btn.disabled = true;
+    btn.querySelector(".auth-spinner").hidden = false;
+    try {
+      const d = await WSA.api("/api/auth/verify-code", {
+        method: "POST",
+        body: JSON.stringify({ code: code(), channel: channel }),
+      });
+      showOk(d.message || "Verified.");
+      if (d.next) setTimeout(() => { location.href = d.next; }, 500);
+      else setTimeout(() => { location.href = "/"; }, 700);
+    } catch (err) {
+      showError(err.message);
+      digits.forEach((d) => (d.value = ""));
+      digits[0].focus();
+      if (err.message && /locked|expired|no longer valid/i.test(err.message)) {
+        $("expiryRow").hidden = true;
+        startResend(0);
+      }
+    } finally {
+      btn.disabled = false;
+      btn.querySelector(".auth-spinner").hidden = true;
+    }
+  });
+
+  // ---------- countdowns ----------
+  function startExpiry(seconds) {
+    let left = Number(seconds || 0);
+    if (left <= 0) { $("expiryRow").hidden = true; return; }
+    $("expiryRow").hidden = false;
+    const tick = setInterval(() => {
+      left -= 1;
+      if (left <= 0) {
+        clearInterval(tick);
+        $("expiryRow").hidden = true;
+        showError("OTP expired. Request a new code.");
+        return;
+      }
+      $("expiryTimer").textContent =
+        String(Math.floor(left / 60)).padStart(2, "0") + ":" + String(left % 60).padStart(2, "0");
+    }, 1000);
+  }
+
+  let resendLeft = Number({{ (resend_in or 0) | tojson }});
+  let resendTimer = null;
+  function renderResend() {
+    const label = $("resendLabel");
+    if (resendLeft > 0) {
+      $("resendBtn").disabled = true;
+      label.textContent = "Resend in " + resendLeft + "s";
+    } else {
+      $("resendBtn").disabled = !channel;
+      label.textContent = "Resend Code";
+    }
+  }
+  function startResend(seconds) {
+    resendLeft = Number(seconds || 0);
+    if (resendTimer) clearInterval(resendTimer);
+    renderResend();
+    if (resendLeft <= 0) return;
+    resendTimer = setInterval(() => {
+      resendLeft -= 1;
+      renderResend();
+      if (resendLeft <= 0) clearInterval(resendTimer);
+    }, 1000);
+  }
+
+  $("resendBtn").addEventListener("click", async () => {
+    $("authError").hidden = true;
+    $("authOk").hidden = true;
+    $("resendBtn").disabled = true;
+    try {
+      const d = await WSA.api("/api/auth/resend-verification-code", {
+        method: "POST",
+        body: JSON.stringify({ channel: channel }),
+      });
+      showOk(d.message || "A new code has been sent.");
+      startExpiry(d.expires_in);
+      startResend(d.resend_in);
+      digits.forEach((x) => (x.value = ""));
+      digits[0].focus();
+    } catch (err) {
+      showError(err.message);
+      if (/wait/i.test(err.message)) {
+        const m = err.message.match(/(\d+)\s*second/);
+        if (m) startResend(Number(m[1]));
+      }
+    } finally {
+      renderResend();
+    }
+  });
+
+  startExpiry({{ (expires_in or 0) | tojson }});
+  startResend({{ (resend_in or 0) | tojson }});
+  if (channel) digits[0].focus();
+})();
+</script>
+{% endblock %}
