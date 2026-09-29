@@ -29,5 +29,8 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Local engine binaries (ZAP, Nuclei, gosqli, bundled JRE)
+tools/
+
 # Logs
 *.log

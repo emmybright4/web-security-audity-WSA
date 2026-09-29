@@ -62,9 +62,12 @@ def scan(config, target, options, progress_cb=None):
         if progress_cb:
             progress_cb(20, "[gosqli] Running external binary")
         try:
-            proc = subprocess.run([exe, "-u", target, "--batch"], capture_output=True,
-                                  text=True, timeout=600)
-            if "injectable" in (proc.stdout or "").lower():
+            proc = subprocess.run([exe, "-u", target, "--silent", "--no-color"],
+                                  capture_output=True, text=True, timeout=600,
+                                  stdin=subprocess.DEVNULL)
+            # gosqli prints "SQLI FOUND ..."; keep "injectable" for compatible wrappers
+            out = (proc.stdout or "").lower().replace(" ", "")
+            if "injectable" in out or "sqlifound" in out:
                 findings.append({
                     "name": "SQL Injection Detected (gosqli)", "severity": "high", "confidence": "firm",
                     "description": f"The external gosqli module flagged the target as injectable.",
