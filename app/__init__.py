@@ -28,21 +28,8 @@ def create_app(config_class=Config):
     from .events import register_socketio_events
     register_socketio_events(socketio)
 
-    from .routes.auth import bp as auth_bp
-    from .routes.dashboard import bp as dashboard_bp
-    from .routes.main import bp as main_bp
-    from .routes.scans import bp as scans_bp
-    from .routes.vulnerabilities import bp as vulns_bp
-    from .routes.reports import bp as reports_bp
-    from .routes.ai import bp as ai_bp
-    from .routes.tools import bp as tools_bp
-    from .routes.templates import bp as templates_bp
-    from .routes.targets import bp as targets_bp
-    from .routes.settings import bp as settings_bp
-    from .routes.ip_scan import bp as ip_scan_bp
-    for bp in (auth_bp, dashboard_bp, main_bp, scans_bp, vulns_bp, reports_bp,
-               ai_bp, tools_bp, templates_bp, targets_bp, settings_bp, ip_scan_bp):
-        app.register_blueprint(bp)
+    from .routes import register_blueprints
+    register_blueprints(app)
 
     with app.app_context():
         db.create_all()
