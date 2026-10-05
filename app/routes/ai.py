@@ -1,9 +1,11 @@
 """AI Assistant API. Uses real findings from the DB; fails honestly when AI is not configured."""
 from flask import Blueprint, current_app, jsonify, request
 
+from ..extensions import db
 from ..models import Scan, Vulnerability
 from ..services.engines import ai_service
 from ._api_guard import api_login_required
+
 
 bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
