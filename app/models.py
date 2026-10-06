@@ -257,7 +257,7 @@ class Scan(db.Model):
     completed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
-    vulnerabilities = db.relationship("Vulnerability", backref="scan", lazy="dynamic",
+    vulnerabilities = db.relationship("Vulnerability", back_populates="scan", lazy="dynamic",
                                       cascade="all, delete-orphan")
     reports = db.relationship("Report", backref="scan", lazy="dynamic",
                               cascade="all, delete-orphan")
@@ -308,6 +308,7 @@ class Vulnerability(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     scan_id = db.Column(db.Integer, db.ForeignKey("scans.id", ondelete="CASCADE"), nullable=True, index=True)
+    scan = db.relationship("Scan", back_populates="vulnerabilities")
     name = db.Column(db.String(255), nullable=False)
     severity = db.Column(db.String(20), default="informational", nullable=False, index=True)
     confidence = db.Column(db.String(20), default="medium")
