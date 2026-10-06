@@ -44,10 +44,23 @@ def _chat(config, system, user, max_tokens=1200):
     if not ok:
         raise AIError(detail)
     provider = config["AI_PROVIDER"]
+    if provider == "ollama":
+        base = (config.get("AI_BASE_URL") or "http://localhost:11434").rstrip("/")
+        model = config.get("AI_MODEL") or "qwen2.5:3b"
+        resp = requests.post(
+            f"{base}/api/chat",
+            json={"model": model, "stream": False,
+                  "messages": [{"role": "system", "content": system},
+                               {"role": "user", "content": user}]},
+            timeout=120)
+        resp.raise_for_status()
+        return resp.json().get("message", {}).get("content", "")
+
     key = config["AI_API_KEY"]
     model = config.get("AI_MODEL") or ("gpt-4o-mini" if provider == "openai" else
                                        "claude-3-5-sonnet-latest" if provider == "anthropic" else
                                        "default")
+
 
     if provider == "anthropic":
         resp = requests.post(
