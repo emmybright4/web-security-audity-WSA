@@ -257,7 +257,7 @@ class Scan(db.Model):
     completed_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False)
 
-    vulnerabilities = db.relationship("Vulnerability", backref="scan", lazy="dynamic",
+    vulnerabilities = db.relationship("Vulnerability", back_populates="scan", lazy="dynamic",
                                       cascade="all, delete-orphan")
     reports = db.relationship("Report", backref="scan", lazy="dynamic",
                               cascade="all, delete-orphan")
@@ -308,6 +308,7 @@ class Vulnerability(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     scan_id = db.Column(db.Integer, db.ForeignKey("scans.id", ondelete="CASCADE"), nullable=True, index=True)
+    scan = db.relationship("Scan", back_populates="vulnerabilities")
     name = db.Column(db.String(255), nullable=False)
     severity = db.Column(db.String(20), default="informational", nullable=False, index=True)
     confidence = db.Column(db.String(20), default="medium")
@@ -317,6 +318,23 @@ class Vulnerability(db.Model):
     target_url = db.Column(db.String(2048), default="")
     url = db.Column(db.String(2048), default="")  # exact endpoint
     detected_by = db.Column(db.String(60), default="WSA Built-in Scanner")
+
+    # Security standards / classification
+    cwe_id = db.Column(db.String(20), nullable=True, index=True)
+    cwe_name = db.Column(db.String(255), nullable=True)
+    owasp_category = db.Column(db.String(100), nullable=True)
+    wstg_category = db.Column(db.String(100), nullable=True)
+
+    # AI enrichment
+    ai_explanation = db.Column(db.Text, nullable=True)
+    ai_impact = db.Column(db.Text, nullable=True)
+    ai_remediation = db.Column(db.Text, nullable=True)
+    ai_references = db.Column(db.Text, nullable=True)
+    ai_confidence = db.Column(db.String(20), nullable=True)
+    ai_provider = db.Column(db.String(50), nullable=True)
+    ai_model = db.Column(db.String(100), nullable=True)
+    ai_generated_at = db.Column(db.DateTime, nullable=True)
+
     status = db.Column(db.String(20), default="open", nullable=False)  # open|in_review|resolved|false_positive
     notes = db.Column(db.Text, default="")
     created_at = db.Column(db.DateTime, default=utcnow, nullable=False, index=True)
@@ -334,6 +352,26 @@ class Vulnerability(db.Model):
             "target_url": self.target_url or (self.scan.target_url if self.scan else ""),
             "url": self.url or "",
             "detected_by": self.detected_by,
+
+            # Security standards / classification
+            "cwe_id": self.cwe_id,
+            "cwe_name": self.cwe_name,
+            "owasp_category": self.owasp_category,
+            "wstg_category": self.wstg_category,
+
+            # AI enrichment
+            "ai_explanation": self.ai_explanation or "",
+            "ai_impact": self.ai_impact or "",
+            "ai_remediation": self.ai_remediation or "",
+            "ai_references": self.ai_references or "",
+            "ai_confidence": self.ai_confidence,
+            "ai_provider": self.ai_provider,
+            "ai_model": self.ai_model,
+            "ai_generated_at": (
+                self.ai_generated_at.isoformat()
+                if self.ai_generated_at else None
+            ),
+
             "status": self.status,
             "notes": self.notes or "",
             "created_at": self.created_at.isoformat() if self.created_at else None,

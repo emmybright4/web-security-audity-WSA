@@ -7,6 +7,7 @@ from ..services.engines import ai_service
 from ._api_guard import api_login_required
 from ._scope import owns, user_id
 
+
 bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
 
