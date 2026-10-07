@@ -8,7 +8,7 @@ from ..extensions import db
 from ..models import (EmailLog, PURPOSE_RECIPIENT_VERIFICATION, SecurityRecipient,
                       Setting, SmsLog, utcnow, VerificationCode)
 from ..services import notification_service, otp_service, rate_limit
-from ..services.engines import zap_service
+from ..services.engines import zap_mcp, zap_service
 from ._api_guard import api_login_required
 from .auth import DeliveryFailed, _masked, _send, current_row
 
@@ -18,21 +18,37 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 
 ALLOWED_KEYS = {"default_scan_type", "polling_fallback_seconds", "max_pages",
                 "notifications_enabled", "confirm_authorization", "theme",
-                "zap_api_url", "zap_api_key"}
+                "zap_api_url", "zap_api_key", "zap_mcp_url",
+                "ai_provider", "ai_api_key", "ai_model", "ai_base_url"}
+
+AI_PROVIDERS = ("openai", "anthropic", "custom")
 
 # Keys whose raw values must never be echoed back to the client.
-SENSITIVE_KEYS = {"zap_api_key"}
+SENSITIVE_KEYS = {"zap_api_key", "ai_api_key"}
 
 # DB setting key -> app.config key. DB values win over .env at runtime.
-CONFIG_OVERRIDES = {"zap_api_url": "ZAP_API_URL", "zap_api_key": "ZAP_API_KEY"}
+CONFIG_OVERRIDES = {"zap_api_url": "ZAP_API_URL", "zap_api_key": "ZAP_API_KEY",
+                    "zap_mcp_url": "ZAP_MCP_URL",
+                    "ai_provider": "AI_PROVIDER", "ai_api_key": "AI_API_KEY",
+                    "ai_model": "AI_MODEL", "ai_base_url": "AI_BASE_URL"}
+
+# Keys where an empty stored value is an explicit "off" and therefore clears the
+# .env value, instead of meaning "nothing saved here, keep .env". Clearing
+# ai_provider is how the AI card is switched off again; ai_api_key is deliberately
+# absent, because an empty secret keeps the stored one (see SENSITIVE_KEYS).
+CLEARABLE_KEYS = {"zap_mcp_url", "ai_provider", "ai_model", "ai_base_url"}
 
 
 def apply_db_settings(app):
     """Overlay DB-stored engine settings on app.config (DB wins over .env)."""
     for key, cfg_key in CONFIG_OVERRIDES.items():
         row = Setting.query.filter_by(key=key).first()
-        if row is not None and str(row.value or "").strip():
-            app.config[cfg_key] = str(row.value).strip()
+        if row is None:
+            continue
+        value = str(row.value or "").strip()
+        if not value and key not in CLEARABLE_KEYS:
+            continue
+        app.config[cfg_key] = value
 
 
 def _db_value(key):
@@ -52,12 +68,25 @@ def get_settings():
     rows = Setting.query.all()
     values = {r.key: r.value for r in rows}
     values.pop("zap_api_key", None)  # never leak the raw key to the client
+    values.pop("ai_api_key", None)   # ...same for the provider key
 
     effective_key = _db_value("zap_api_key") or current_app.config.get("ZAP_API_KEY", "")
     values["zap_api_key_set"] = bool(effective_key)
     values["zap_api_key_masked"] = _mask(effective_key)
     if not _db_value("zap_api_url").strip():
         values["zap_api_url"] = current_app.config.get("ZAP_API_URL", "")
+    # An empty MCP URL is an explicit "native ZAP API mode", so only fall back to
+    # .env when the key has never been saved at all.
+    values.setdefault("zap_mcp_url", current_app.config.get("ZAP_MCP_URL", ""))
+    # AI: the key is reported as present/absent only, and the plain settings fall
+    # back to .env while an explicitly saved empty value stays empty.
+    effective_ai_key = _db_value("ai_api_key") or current_app.config.get("AI_API_KEY", "")
+    values["ai_api_key_set"] = bool(effective_ai_key)
+    values["ai_api_key_masked"] = _mask(effective_ai_key)
+    for cfg_key, db_key in (("AI_PROVIDER", "ai_provider"),
+                            ("AI_MODEL", "ai_model"),
+                            ("AI_BASE_URL", "ai_base_url")):
+        values.setdefault(db_key, current_app.config.get(cfg_key, ""))
     values.setdefault("default_scan_type", "quick")
     values.setdefault("polling_fallback_seconds",
                       current_app.config.get("POLLING_FALLBACK_SECONDS", 4))
@@ -78,6 +107,8 @@ def put_settings():
         value = str(value).strip() if isinstance(value, str) else value
         if key == "zap_api_url" and isinstance(value, str):
             value = value.rstrip("/")
+        if key == "ai_provider" and isinstance(value, str):
+            value = value.lower()
         if key in SENSITIVE_KEYS and not str(value or "").strip():
             continue  # empty secret = keep the stored value
         row = db.session.get(Setting, key)
@@ -85,7 +116,9 @@ def put_settings():
             row = Setting(key=key)
             db.session.add(row)
         row.value = value
-        updated[key] = value
+        # The GET handler strips secrets; the save response must not reintroduce
+        # them, or the raw key would travel back on every Settings save.
+        updated[key] = _mask(value) if key in SENSITIVE_KEYS else value
     try:
         db.session.commit()
     except Exception as exc:
@@ -110,6 +143,52 @@ def test_zap():
         return jsonify(ok=False, version="", detail="No ZAP API URL provided or saved.")
     ok, version, detail = zap_service.ping({"ZAP_API_URL": url, "ZAP_API_KEY": key})
     return jsonify(ok=ok, version=version, detail=detail)
+
+
+@bp.post("/zap-mcp/test")
+@api_login_required
+def test_zap_mcp():
+    """Probe the MCP endpoint with the submitted value, or the saved/configured one."""
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("zap_mcp_url") or "").strip().rstrip("/")
+    if not url:
+        url = _db_value("zap_mcp_url") or current_app.config.get("ZAP_MCP_URL", "")
+    ok, detail = zap_mcp.availability({"ZAP_MCP_URL": url,
+                                       "ZAP_API_URL": current_app.config.get("ZAP_API_URL", ""),
+                                       "ZAP_API_KEY": current_app.config.get("ZAP_API_KEY", "")})
+    return jsonify(ok=ok, detail=detail)
+
+
+@bp.post("/ai/test")
+@api_login_required
+def test_ai():
+    """Validate the submitted AI settings, falling back to the saved/configured ones."""
+    from ..services.engines import ai_service
+
+    data = request.get_json(silent=True) or {}
+
+    def pick(field, cfg_key):
+        value = str(data.get(field) or "").strip()
+        if value:
+            return value
+        return _db_value(field) or str(current_app.config.get(cfg_key, "") or "")
+
+    provider = pick("ai_provider", "AI_PROVIDER").lower()
+    config = {"AI_PROVIDER": provider,
+              "AI_API_KEY": pick("ai_api_key", "AI_API_KEY"),
+              "AI_MODEL": pick("ai_model", "AI_MODEL"),
+              "AI_BASE_URL": pick("ai_base_url", "AI_BASE_URL")}
+    if provider and provider not in AI_PROVIDERS:
+        return jsonify(ok=False,
+                       detail=f"Unknown provider '{provider}'. Use one of: "
+                              f"{', '.join(AI_PROVIDERS)}.")
+    # availability() first (no network) so a half-filled form fails fast and
+    # cheaply; ping() then sends the real request.
+    ok, detail = ai_service.availability(config)
+    if not ok:
+        return jsonify(ok=False, detail=detail)
+    ok, detail = ai_service.ping(config)
+    return jsonify(ok=ok, detail=detail)
 
 
 # =====================================================================

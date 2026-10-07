@@ -14,7 +14,7 @@ Every value on the dashboard is computed live from the SQLite database — nothi
 |---|---|
 | **Sign in & verification** | Email address + password, then a one-time code emailed to that address (hashed, expiring, attempt- and resend-limited) — the workspace opens only after the code is accepted |
 | **Dashboard** | Live Total Scans / High / Medium / Low cards with trends + sparklines, Findings Overview donut, Vulnerability Trend line chart, Recent Scans with live progress — all from SQLite |
-| **Live Findings chart** | Real-time category chart (1h / 24h / 30d) with minute-level buckets, a pulsing LIVE badge and glowing neon series — redraws the moment a scan finds something |
+| **Live Findings chart** | Real-time category chart (1h / 24h / 30d) with minute-level buckets, a pulsing LIVE badge and smooth gradient-filled series on a white panel — redraws the moment a scan finds something and never sits still: figures drift across the plot, a light band sweeps it, each curve breathes with a soft glow and comets travel the lines |
 | **New Scan** | Full engine configuration (Playwright, ZAP, Nuclei, Time-based SQLi, AI assist), authentication, scan policy, authorization confirmation, template saving |
 | **Scan Templates** | Save reusable configs, launch a scan directly from a template |
 | **Target Management** | Aggregated per-target stats (scans, findings by severity) from real records |
@@ -150,7 +150,17 @@ All external tools are **optional**. Unconfigured tools show **"Not configured"*
 | **Playwright** | `pip install playwright && playwright install chromium` | JavaScript-rendered crawling |
 | **Nuclei** | Install the binary, set `NUCLEI_BIN` if not in PATH | Template-based scanning |
 | **gosqli** | Set `GOSQLI_BIN` to the binary; the built-in time-based SQLi module always works | SQL injection testing |
-| **AI / LLM** | Set `AI_PROVIDER` (`openai`/`anthropic`/`custom`), `AI_API_KEY`, optional `AI_MODEL`, `AI_BASE_URL` | Vulnerability explanations & summaries |
+| **AI / LLM** | Settings → **AI / LLM**: provider, API key, model, optional base URL. Saved values take effect immediately (overriding `.env`) and clearing the provider turns the layer off again | Vulnerability explanations & summaries |
+
+On Windows the repo keeps a ready-to-run bundle under `tools/` (git-ignored): ZAP 2.17.0 plus
+its own JRE. Put `ZAP_API_URL` and `ZAP_API_KEY` in `.env`; WSA then launches the daemon itself
+in the background (`tools\start-zap.bat`, API on `127.0.0.1:8080`, key taken from `.env`) whenever
+it is not yet reachable, so **Test All Connections** on the Tools page turns *connected* with the
+live version even after a reboot. Run the script by hand if you prefer to manage ZAP yourself, or
+set `ZAP_AUTOSTART=false` to stop WSA from starting it. `ZAP_MCP_URL` is optional — leave it empty
+and the ZAP-MCP card reports native ZAP API mode, or set it from the ZAP-MCP card in Settings
+(overriding `.env`, no restart needed). In the UI, every card's **Configuration** button
+jumps straight to the matching section of Settings (`#zap`, `#zapmcp`, `#ai`, `#engines`).
 
 ## Configuration (.env)
 

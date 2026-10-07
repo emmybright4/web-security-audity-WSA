@@ -59,9 +59,68 @@
   No scans performed yet. Start your first authorized audit.
 </div>
 
-<!-- ===================== LIVE FINDINGS (real time) ===================== -->
+<!-- ============ MAIN CHART — SECURITY ANALYTICS (mountain centerpiece) ============ -->
 <div class="row g-3 mb-3">
   <div class="col-12">
+    <div class="wsa-card wsa-chart-card wsa-mountain-card">
+      <div class="wsa-card-head">
+        <div>
+          <h6 class="wsa-section-title">Security Analytics</h6>
+          <span class="wsa-section-sub">Security scans, vulnerabilities found and critical findings over time</span>
+        </div>
+        <div class="wsa-mountain-controls">
+          <label class="wsa-toolbar-label" for="trendDays">Range</label>
+          <select id="trendDays" class="wsa-select wsa-select-sm">
+            <option value="7">Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+            <option value="0">All time</option>
+          </select>
+          <div class="wsa-seg wsa-seg-compact" role="tablist" aria-label="Trend granularity">
+            <button type="button" class="wsa-seg-btn active" data-gran="day">Day</button>
+            <button type="button" class="wsa-seg-btn" data-gran="week">Week</button>
+            <button type="button" class="wsa-seg-btn" data-gran="month">Month</button>
+          </div>
+        </div>
+      </div>
+      <div id="trendLoading" class="wsa-chart-loading">
+        <span class="wsa-spinner"></span> Loading chart…
+      </div>
+      <div id="trendError" class="wsa-chart-error" hidden>
+        <i class="bi bi-wifi-off"></i>
+        <b>Couldn't load the trend.</b>
+        <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button>
+      </div>
+      <div id="trendEmpty" class="wsa-chart-empty wsa-mountain-empty" hidden>
+        <svg class="wsa-mountain-ghost" viewBox="0 0 640 132" aria-hidden="true">
+          <path class="wsa-ghost-line wsa-ghost-purple" d="M8 112 C 70 108, 96 34, 150 34 C 204 34, 232 106, 292 108 C 352 110, 384 52, 442 50 C 500 48, 540 100, 632 108"/>
+          <path class="wsa-ghost-line wsa-ghost-cyan" d="M8 114 C 76 112, 110 74, 164 74 C 218 74, 248 116, 306 116 C 364 116, 400 66, 452 64 C 504 62, 556 108, 632 112"/>
+          <path class="wsa-ghost-line wsa-ghost-pink" d="M8 118 C 84 116, 118 96, 168 96 C 218 96, 250 122, 308 122 C 366 122, 408 92, 456 90 C 504 88, 556 116, 632 116"/>
+        </svg>
+        <b>No scans yet — the mountains start at zero.</b>
+        <span>Run your first authorized audit and this chart grows from real data.</span>
+      </div>
+      <div id="trendChartWrap" class="wsa-trend-wrap wsa-trend-neon" hidden>
+        <div class="wsa-trend-neon-head">
+          <div>
+            <div class="wsa-trend-neon-kicker">SECURITY ANALYTICS</div>
+            <div class="wsa-trend-neon-sub">Real data only — every point comes from your scans</div>
+          </div>
+          <div class="wsa-trend-neon-live"><span class="wsa-trend-neon-dot"></span> LIVE</div>
+        </div>
+        <div id="trendDotLegend" class="wsa-dot-legend"></div>
+        <div class="wsa-trend-stage wsa-trend-stage-tall">
+          <canvas id="trendChart"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== LIVE FINDINGS (real time) ===================== -->
+<div class="row g-3 mb-3">
+  <div class="col-12 col-lg-7">
     <div class="wsa-card wsa-chart-card">
       <div class="wsa-card-head">
         <div>
@@ -94,7 +153,7 @@
         <b id="liveEmptyTitle">No findings in this window yet.</b>
         <span id="liveEmptyNote">Run a scan and findings will appear here as they are found.</span>
       </div>
-      <div id="liveChartWrap" class="wsa-trend-wrap wsa-trend-night" hidden>
+      <div id="liveChartWrap" class="wsa-trend-wrap wsa-trend-panel" hidden>
         <div id="liveDotLegend" class="wsa-dot-legend"></div>
         <div class="wsa-trend-stage">
           <canvas id="liveTrendChart"></canvas>
@@ -102,10 +161,8 @@
       </div>
     </div>
   </div>
-</div>
 
-<div class="row g-3 mb-3">
-  <!-- ===================== DONUT ===================== -->
+  <!-- ===================== FINDINGS OVERVIEW (severity distribution) ===================== -->
   <div class="col-12 col-lg-5">
     <div class="wsa-card wsa-chart-card">
       <div class="wsa-card-head">
@@ -134,63 +191,6 @@
           <div class="wsa-donut-center"><b id="donutCenter">0</b><span>total findings</span></div>
         </div>
         <div id="donutLegend" class="wsa-donut-legend"></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- ===================== TREND ===================== -->
-  <div class="col-12 col-lg-7">
-    <div class="wsa-card wsa-chart-card">
-      <div class="wsa-card-head">
-        <div>
-          <h6 class="wsa-section-title">Vulnerability Trend</h6>
-          <span class="wsa-section-sub">Real findings per day from completed scans</span>
-        </div>
-        <div class="wsa-seg" role="tablist" aria-label="Trend grouping">
-          <button type="button" class="wsa-seg-btn active" id="trendModeTypes" data-mode="types">Vulnerability Types</button>
-          <button type="button" class="wsa-seg-btn" id="trendModeSev" data-mode="severity">Severity Levels</button>
-        </div>
-      </div>
-      <div class="wsa-trend-toolbar">
-        <label class="wsa-toolbar-label" for="trendDays">Date range</label>
-        <select id="trendDays" class="wsa-select wsa-select-sm">
-          <option value="7">Last 7 days</option>
-          <option value="14">Last 14 days</option>
-          <option value="30" selected>Last 30 days</option>
-          <option value="90">Last 90 days</option>
-          <option value="0">All time</option>
-        </select>
-        <div class="wsa-seg wsa-seg-compact ms-2" role="tablist" aria-label="Trend granularity">
-          <button type="button" class="wsa-seg-btn active" data-gran="day">Day</button>
-          <button type="button" class="wsa-seg-btn" data-gran="week">Week</button>
-          <button type="button" class="wsa-seg-btn" data-gran="month">Month</button>
-        </div>
-        <div class="wsa-type-filter ms-auto" id="typeFilterBox">
-          <button type="button" class="btn btn-sm wsa-btn-ghost" id="typeFilterBtn"
-                  title="Show or hide vulnerability types">
-            <i class="bi bi-sliders"></i> Filters
-          </button>
-          <div class="wsa-type-menu" id="typeFilterMenu" hidden></div>
-        </div>
-      </div>
-      <div id="trendLoading" class="wsa-chart-loading">
-        <span class="wsa-spinner"></span> Loading chart…
-      </div>
-      <div id="trendError" class="wsa-chart-error" hidden>
-        <i class="bi bi-wifi-off"></i>
-        <b>Couldn't load the trend.</b>
-        <button class="btn btn-sm wsa-btn-ghost" onclick="WSA.refreshNow()">Retry</button>
-      </div>
-      <div id="trendEmpty" class="wsa-chart-empty" hidden>
-        <i class="bi bi-graph-up-arrow"></i>
-        <b>No trend data yet.</b>
-        Findings from your scans will be charted here over time.
-      </div>
-      <div id="trendChartWrap" class="wsa-trend-wrap wsa-trend-night" hidden>
-        <div id="trendDotLegend" class="wsa-dot-legend"></div>
-        <div class="wsa-trend-stage">
-          <canvas id="trendChart"></canvas>
-        </div>
       </div>
     </div>
   </div>
@@ -264,23 +264,36 @@
   })();
 
   // ---------- Vulnerability Trend (multi-line) ----------
+  // Dark neon panel in the reference style: deep-navy background, neon curves
+  // with soft fills, dotted grid, pill dot legend, dark tooltip, and no legend
+  // inside the plot. The Oct–Dec "forecast tail" of the reference is projected
+  // data we cannot reproduce: every point here comes from a real scan finding.
   let trend = null;
-  let live = null;               // the real-time chart (shares the night style)
-  let trendMode = "types";
+  let live = null;               // the real-time chart (shares the trend-panel style)
   let trendDays = 30;
   let trendGran = "day";
-  let trendMeta = { mode: "types", dates: [], series: [] };  // last server payload
+  let trendMeta = { dates: [], series: [] };  // last server payload
   const hiddenKeys = new Set();
 
   const TREND_FX = { t0: performance.now() };   // animation clock shared by plugins
+  let trendSweep = null;                        // armed left-to-right draw-in wipe (null = off)
+  let trendSig = null;                          // date/series signature of the last painted trend
 
-  // Shared night-panel line builder. The daily trend and the live chart both
+  // Shared trend-panel line builder. The daily trend and the live chart both
   // use it, so every line, tooltip, axis and animation matches exactly.
-  function buildNightChart(canvasId) {
+  // The Vulnerability Trend panel is dark (wsa-trend-neon) while the live
+  // panel stays light, so the builder detects the panel tone from the canvas
+  // and reads back the matching grid / tick / hover colours.
+  function buildTrendChart(canvasId) {
     const el = document.getElementById(canvasId);
     if (!el || typeof Chart === "undefined") return null;
+    const neon = !!(el.closest && el.closest(".wsa-trend-neon"));
+    const GRID = neon ? "rgba(148, 178, 255, .12)" : "rgba(15, 42, 92, .08)";
+    const TICK = neon ? "#8fa3c8" : "#5b6b85";
+    const AXIS = neon ? "rgba(148, 178, 255, .22)" : "rgba(15, 42, 92, .16)";
+    const HOVER = neon ? "rgba(148, 178, 255, .30)" : "rgba(15, 42, 92, .18)";
 
-    // dashed hover crosshair (light on dark)
+    // dashed hover crosshair (light on dark, slate on the white live panel)
     const hoverRowPlugin = {
       id: "wsaHoverRow",
       afterDatasetsDraw(chart) {
@@ -292,10 +305,79 @@
         ctx.beginPath();
         ctx.setLineDash([4, 4]);
         ctx.lineWidth = 1.2;
-        ctx.strokeStyle = "rgba(148, 178, 255, .35)";
+        ctx.strokeStyle = chart.config.options._wsaHover;   // panel tone
         ctx.moveTo(px, a.top);
         ctx.lineTo(px, a.bottom);
         ctx.stroke();
+        ctx.restore();
+      },
+    };
+
+    // ---------- Moving background: drifting figures + a travelling light band.
+    // The reference live chart never sits still - figures drift across the plot
+    // while a soft sweep crosses it. The panel stays white, so the digits are
+    // painted faintly (opacity .07-.14): texture, never data.
+    const FLOAT_COLORS = ["#6366f1", "#ec4899", "#0891b2", "#8b5cf6", "#f59e0b", "#10b981"];
+    const floaters = (() => {
+      const list = [];
+      let seed = canvasId.length * 977 + 13;        // stable per chart, no flicker
+      const rnd = () => {
+        seed = (seed * 1103515245 + 12345) % 2147483648;
+        return seed / 2147483648;
+      };
+      for (let i = 0; i < 26; i++) {
+        list.push({
+          text: String(1000 + Math.floor(rnd() * 8999)),
+          x0: rnd(),                                // start position, 0..1
+          y: 0.06 + rnd() * 0.88,                   // row, 0..1 down the plot
+          speed: 0.02 + rnd() * 0.03,               // plot widths per second
+          size: 11 + Math.floor(rnd() * 9),
+          color: FLOAT_COLORS[i % FLOAT_COLORS.length],
+          alpha: 0.07 + rnd() * 0.07,
+          bob: 0.4 + rnd() * 0.7,                   // vertical drift frequency
+          phase: rnd() * 6.28,
+        });
+      }
+      return list;
+    })();
+
+    const driftPlugin = {
+      id: "wsaDrift",
+      beforeDatasetsDraw(chart) {
+        const area = chart.chartArea;
+        if (!area || document.hidden) return;
+        const { ctx } = chart;
+        const now = performance.now();
+        const w = area.right - area.left, h = area.bottom - area.top;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(area.left, area.top, w, h);
+        ctx.clip();
+
+        // soft light band sweeping left to right
+        const period = 5200;
+        const bw = Math.min(130, w * 0.16);
+        const cx = area.left + ((now % period) / period) * (w + 2 * bw) - bw;
+        const g = ctx.createLinearGradient(cx - bw, 0, cx + bw, 0);
+        g.addColorStop(0, "rgba(99, 102, 241, 0)");
+        g.addColorStop(0.5, "rgba(99, 102, 241, .09)");
+        g.addColorStop(1, "rgba(99, 102, 241, 0)");
+        ctx.fillStyle = g;
+        ctx.fillRect(cx - bw, area.top, 2 * bw, h);
+
+        // drifting figures behind the curves
+        ctx.textBaseline = "middle";
+        for (const f of floaters) {
+          const t = (f.x0 + (now / 1000) * f.speed) % 1.25;
+          const x = area.left + t * w - w * 0.1;
+          if (x < area.left - 40 || x > area.right + 40) continue;
+          const y = area.top + f.y * h + Math.sin((now / 1000) * f.bob + f.phase) * 7;
+          ctx.globalAlpha = f.alpha;
+          ctx.fillStyle = f.color;
+          ctx.font = `700 ${f.size}px "Segoe UI", system-ui, sans-serif`;
+          ctx.fillText(f.text, x, y);
+        }
         ctx.restore();
       },
     };
@@ -331,10 +413,16 @@
             ctx.globalAlpha = 1;
             ctx.shadowColor = color;
             ctx.shadowBlur = 12;
-            ctx.fillStyle = "#fff";
+            ctx.fillStyle = color;                      // a white core would vanish on a white panel
             ctx.beginPath();
             ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
             ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = "#fff";                   // crisp outline keeps the dot readable
+            ctx.lineWidth = 1.4;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, 3.7, 0, Math.PI * 2);
+            ctx.stroke();
             ctx.restore();
             return;
           }
@@ -398,11 +486,16 @@
           ctx.save();
           ctx.shadowColor = color;
           ctx.shadowBlur = 14;
-          ctx.fillStyle = "#fff";
+          ctx.fillStyle = color;                        // a white core would vanish on a white panel
           ctx.beginPath();
           ctx.arc(cx, cy, 2.6, 0, Math.PI * 2);
           ctx.fill();
           ctx.shadowBlur = 0;
+          ctx.strokeStyle = "#fff";                     // crisp outline keeps the head readable
+          ctx.lineWidth = 1.4;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 3.4, 0, Math.PI * 2);
+          ctx.stroke();
           ctx.fillStyle = color;
           ctx.globalAlpha = 0.5;
           ctx.beginPath();
@@ -413,6 +506,76 @@
       },
     };
 
+    // ---------- Breathing curve glow ----------
+    // Re-strokes each series with a pulsing shadow so the curves shimmer the way
+    // the reference chart does. `path()` is Chart.js's own bezier path, so the
+    // glow follows the exact curve rather than a polyline approximation.
+    const glowPlugin = {
+      id: "wsaGlow",
+      afterDatasetsDraw(chart) {
+        if (document.hidden) return;
+        const { ctx } = chart;
+        const now = performance.now();
+        chart.data.datasets.forEach((ds, i) => {
+          const meta = chart.getDatasetMeta(i);
+          if (meta.hidden || !meta.dataset || !ds.borderColor) return;
+          const pulse = 0.5 + 0.5 * Math.sin(now / 640 + i * 1.1);
+          ctx.save();
+          try {
+            ctx.beginPath();
+            meta.dataset.path(ctx);
+          } catch (_) {
+            ctx.restore();
+            return;                                  // chart mid-layout
+          }
+          ctx.setLineDash([]);
+          ctx.lineCap = "round";
+          ctx.lineJoin = "round";
+          ctx.lineWidth = (ds.borderWidth || 2) + (neon ? 2.6 : 1.5);
+          ctx.strokeStyle = ds.borderColor;
+          ctx.shadowColor = ds.borderColor;
+          ctx.shadowBlur = neon ? 10 + 14 * pulse : 6 + 8 * pulse;
+          ctx.globalAlpha = (neon ? 0.32 : 0.26) + (neon ? 0.34 : 0.3) * pulse;
+          ctx.stroke();
+          ctx.restore();
+        });
+      },
+    };
+
+    // Reference-style draw-in: while `trendSweep` is armed the lines, points
+    // and area fills are revealed by a wipe travelling left to right, while
+    // grid and axes stay put. The clip opens in beforeDatasetsDraw and closes
+    // in afterDraw, so the comets travelling along the lines are wiped in
+    // together with them. Only the trend chart ever arms it.
+    const sweepPlugin = {
+      id: "wsaSweep",
+      beforeDatasetsDraw(chart) {
+        if (chart.canvas.id !== "trendChart") return;
+        if (chart._wsaSweepClip) {                    // heal a clip from a broken frame
+          chart._wsaSweepClip = false;
+          chart.ctx.restore();
+        }
+        const area = chart.chartArea;
+        if (!trendSweep || !area) return;
+        const p = Math.min(1, (performance.now() - trendSweep.t0) / trendSweep.dur);
+        if (p >= 1) { trendSweep = null; return; }    // sweep done — draw everything
+        const e = 1 - Math.pow(1 - p, 3);             // easeOutCubic wipe
+        const { ctx } = chart;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(area.left - 2, area.top - 10,
+                 (area.right - area.left + 4) * e, area.bottom - area.top + 20);
+        ctx.clip();
+        chart._wsaSweepClip = true;
+      },
+      afterDraw(chart) {
+        if (chart._wsaSweepClip) {
+          chart._wsaSweepClip = false;
+          chart.ctx.restore();
+        }
+      },
+    };
+
     return new Chart(el, {
       type: "line",
       data: { labels: [], datasets: [] },
@@ -420,6 +583,8 @@
         responsive: true, maintainAspectRatio: false,
         animation: { duration: 1400, easing: "easeOutQuart" },   // draw-in animation
         animationDuration: 1400,
+        // custom update mode: points glide from their old values to new ones
+        transitions: { glide: { animation: { duration: 900, easing: "easeInOutCubic" } } },
         interaction: { mode: "index", intersect: false },
         layout: { padding: { right: 8 } },
         plugins: {
@@ -430,16 +595,19 @@
           },
         },
         scales: {
-          x: { grid: { color: "rgba(148, 178, 255, .08)", borderDash: [3, 5] },
-               ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12, color: "#8fa3c8", font: { size: 11 } },
-               border: { color: "rgba(148, 178, 255, .18)" } },
+          // Mountain style: dotted horizontal grid only, minimal axes
+          x: { grid: neon ? { display: false } : { color: GRID, borderDash: [3, 5] },
+               ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 12, color: TICK, font: { size: 11 } },
+               border: { color: AXIS } },
           y: { beginAtZero: true,
-               ticks: { precision: 0, color: "#8fa3c8", font: { size: 11 } },
-               grid: { color: "rgba(148, 178, 255, .08)", borderDash: [3, 5] },
+               grace: neon ? "8%" : undefined,
+               ticks: { precision: 0, color: TICK, font: { size: 11 } },
+               grid: { color: GRID, borderDash: neon ? [2, 7] : [3, 5] },
                border: { display: false } },
         },
+        _wsaHover: HOVER,   // read back by the wsaHoverRow plugin per panel tone
       },
-      plugins: [hoverRowPlugin, cometPlugin],
+      plugins: [driftPlugin, sweepPlugin, hoverRowPlugin, glowPlugin, cometPlugin],
     });
   }
 
@@ -496,47 +664,91 @@
   function toggleTypeKey(key) {
     if (hiddenKeys.has(key)) hiddenKeys.delete(key); else hiddenKeys.add(key);
     renderTrend();
-    renderTypeMenu();
   }
 
-  // neon palette for the midnight chart (assigned in stable order per key)
-  const NEON_PALETTE = ["#6366f1", "#22d3ee", "#ec4899", "#a78bfa", "#34d399",
-                        "#fbbf24", "#f87171", "#38bdf8", "#c084fc", "#4ade80"];
+  // Reference-style palette: electric violet / cyan / magenta first, then the
+  // rest of the neon set. No dotted "forecast" series is ever added - every
+  // plotted value comes straight from the API payload.
+  const SERIES_PALETTE = ["#7c5cff", "#22d3ee", "#ff2fb3", "#8b5cf6", "#10b981",
+                          "#f59e0b", "#ef4444", "#0ea5e9", "#a855f7", "#22c55e"];
+
+  // Main chart series keep the reference's neon colours whatever the database
+  // contains: purple mountains for findings, cyan scans behind, pink critical
+  // findings on top. The live categories chart keeps the rotating palette.
+  const MOUNTAIN_COLORS = {
+    vulnerabilities: "#6C2BFF",
+    scans: "#00BFFF",
+    critical: "#FF2DAA",
+  };
+
+  // Friendly axis labels ("Oct 2", "Oct 2026") parsed as LOCAL dates so the
+  // server's UTC date strings can never shift a bucket across midnight.
+  function trendDateLabel(d) {
+    const p = String(d).split("-");
+    if (p.length === 3) {
+      return new Date(+p[0], p[1] - 1, +p[2])
+        .toLocaleDateString([], { month: "short", day: "numeric" });
+    }
+    if (p.length === 2) {
+      return new Date(+p[0], p[1] - 1, 1)
+        .toLocaleDateString([], { month: "short", year: "numeric" });
+    }
+    return d;
+  }
 
   function renderTrend() {
-    const chart = trend || (trend = buildNightChart("trendChart"));
+    const chart = trend || (trend = buildTrendChart("trendChart"));
     if (!chart) return;
     const { dates, series } = trendMeta;
     const visible = series.filter((s) => !hiddenKeys.has(s.key));
-    chart.data.labels = dates.map((d) => d.slice(5));  // MM-DD keeps the axis readable
-    chart.data.datasets = visible.map((s, i) => ({
-      key: s.key,
-      label: s.label,
-      data: s.data,
-      borderColor: s.color,
-      backgroundColor: (ctx) => {                    // vertical neon gradient fill under each line
-        const { ctx: c, chartArea } = ctx.chart;
-        if (!chartArea) return "transparent";
-        const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
-        g.addColorStop(0, hexA(s.color, 0.35));      // glow at the line
-        g.addColorStop(0.55, hexA(s.color, 0.10));
-        g.addColorStop(1, hexA(s.color, 0.02));      // fade at the axis
-        return g;
-      },
-      pointBackgroundColor: "#0b1220",
-      pointBorderColor: s.color,
-      pointBorderWidth: 2,
-      pointRadius: 3.5,
-      pointHoverRadius: 6,
-      pointHoverBorderWidth: 2.5,
-      pointHoverBackgroundColor: "#fff",
-      borderWidth: 2.5,
-      tension: 0.42,                                 // extra-smooth flowing curves
-      fill: true,
-      spanGaps: true,
-    }));
-    TREND_FX.t0 = performance.now();                 // restart comet cycles in sync
-    chart.update();
+    const labels = dates.map(trendDateLabel);          // "Oct 2" / "Oct 2026"
+    const datasets = visible.map((s, i) => {
+      const color = MOUNTAIN_COLORS[s.key] || SERIES_PALETTE[i % SERIES_PALETTE.length];
+      s.color = color;                                // the dot legend reads this back
+      return {
+        key: s.key,
+        label: s.label,
+        data: s.data,
+        borderColor: color,
+        backgroundColor: (ctx) => {                  // layered mountain fill: dense
+          const { ctx: c, chartArea } = ctx.chart;   // under the ridge, fading out
+          if (!chartArea) return "transparent";      // toward the axis
+          const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+          g.addColorStop(0, hexA(color, 0.42));
+          g.addColorStop(0.5, hexA(color, 0.15));
+          g.addColorStop(1, hexA(color, 0));
+          return g;
+        },
+        pointBackgroundColor: "#fff",
+        pointBorderColor: color,
+        pointBorderWidth: 2,
+        pointRadius: 3,
+        pointHoverRadius: 6,
+        pointHoverBorderWidth: 2.5,
+        pointHoverBackgroundColor: "#fff",
+        borderWidth: 2.6,                             // glowing neon edge
+        tension: 0.5,                                 // rolling hills, never angular
+        fill: true,
+        spanGaps: true,
+      };
+    });
+
+    // New dates or a different set of series = structural change: replay the
+    // reference-style left-to-right draw-in sweep. Same shape with new numbers
+    // = glide morph, so the existing points slide to their new values.
+    const sig = labels.join(",") + "|" + visible.map((s) => s.key).join(",");
+    if (sig !== trendSig) {
+      trendSig = sig;
+      chart.data.labels = labels;
+      chart.data.datasets = datasets;
+      TREND_FX.t0 = performance.now();               // restart comet cycles in sync
+      trendSweep = { t0: performance.now(), dur: 1600 };
+      chart.update("none");                          // the clip wipe does the motion
+    } else {
+      // keep the dataset objects so Chart.js knows where each point came from
+      datasets.forEach((d, i) => Object.assign(chart.data.datasets[i], d));
+      chart.update("glide");
+    }
     renderDotLegend(visible);
   }
 
@@ -550,23 +762,6 @@
       </button>`).join("");
     box.querySelectorAll(".wsa-dot-legend-item").forEach((b) => {
       b.addEventListener("click", () => toggleTypeKey(b.dataset.key));
-    });
-  }
-
-  function renderTypeMenu() {
-    const menu = document.getElementById("typeFilterMenu");
-    if (!menu) return;
-    const { series } = trendMeta;
-    if (!series.length) { menu.innerHTML = "<div class='wsa-type-menu-empty'>No series</div>"; return; }
-    menu.innerHTML = series.map((s) => `
-      <label class="wsa-type-item ${hiddenKeys.has(s.key) ? "off" : ""}">
-        <input type="checkbox" ${hiddenKeys.has(s.key) ? "" : "checked"} data-key="${esc(s.key)}">
-        <span class="wsa-type-swatch" style="background:${s.color}"></span>
-        <span class="wsa-type-name" title="${esc(s.label)}">${esc(s.label)}</span>
-        <b>${s.total}</b>
-      </label>`).join("");
-    menu.querySelectorAll("input[type=checkbox]").forEach((cb) => {
-      cb.addEventListener("change", () => toggleTypeKey(cb.dataset.key));
     });
   }
 
@@ -609,7 +804,7 @@
   }
 
   function renderLive(updateMode) {
-    const chart = live || (live = buildNightChart("liveTrendChart"));
+    const chart = live || (live = buildTrendChart("liveTrendChart"));
     if (!chart) return;
     const visible = liveMeta.series.filter((s) => !liveHidden.has(s.key));
     const last = liveMeta.buckets.length - 1;
@@ -621,7 +816,7 @@
         label: s.label,
         data: s.data,
         borderColor: s.color,
-        backgroundColor: (ctx) => {                      // vertical neon glow
+        backgroundColor: (ctx) => {                      // vertical gradient glow
           const { ctx: c, chartArea } = ctx.chart;
           if (!chartArea) return "transparent";
           const g = c.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
@@ -635,7 +830,7 @@
           if (ctx.dataIndex === last) return v > 0 ? 5 : 3;
           return v > 0 && v === peak ? 4.5 : 3;
         },
-        pointBackgroundColor: "#0b1220",
+        pointBackgroundColor: "#fff",
         pointBorderColor: s.color,
         pointBorderWidth: 2,
         pointHoverRadius: 6,
@@ -698,7 +893,7 @@
       } else {
         d.series.forEach((s) => {                        // colour per key, never re-shuffled
           if (!(s.key in liveColors)) {
-            liveColors[s.key] = NEON_PALETTE[Object.keys(liveColors).length % NEON_PALETTE.length];
+            liveColors[s.key] = SERIES_PALETTE[Object.keys(liveColors).length % SERIES_PALETTE.length];
           }
           s.color = liveColors[s.key];
         });
@@ -827,32 +1022,19 @@
   async function loadTrend() {
     setChartState("trend", "loading");
     try {
-      const qs = `?mode=${encodeURIComponent(trendMode)}&days=${trendDays}&gran=${trendGran}`;
+      const qs = `?mode=mountain&days=${trendDays}&gran=${trendGran}`;
       const d = await WSA.api("/api/dashboard/vulnerability-trend" + qs);
       if (d.error) throw new Error(d.error);
       if (d.empty || !d.series.length) {
-        trendMeta = { mode: trendMode, dates: [], series: [] };
+        // No scans at all: the ghost-mountains empty state holds the panel and
+        // the chart develops from real history once audits run.
+        trendMeta = { dates: [], series: [] };
         setChartState("trend", "empty");
-        renderTypeMenu();
         return;
       }
-      // attach stable colors per series (severity keeps its semantic color)
-      const typeColors = {};
-      let next = 0;
-      d.series.forEach((s) => {
-        if (trendMode === "severity") {
-          // neon-brightened severity colors so they glow on the dark panel
-          s.color = { critical: "#f87171", high: "#fb7185", medium: "#fbbf24",
-                      low: "#34d399", informational: "#38bdf8" }[s.key] || "#94a3b8";
-        } else {
-          if (!(s.key in typeColors)) typeColors[s.key] = NEON_PALETTE[next++ % NEON_PALETTE.length];
-          s.color = typeColors[s.key];
-        }
-      });
-      trendMeta = { mode: trendMode, dates: d.dates, series: d.series };
+      trendMeta = { dates: d.dates, series: d.series };
       setChartState("trend", "ok");
       renderTrend();
-      renderTypeMenu();
     } catch (e) {
       setChartState("trend", "error");
     }
@@ -866,6 +1048,7 @@
         document.querySelectorAll("[data-gran]").forEach((b) => b.classList.remove("active"));
         btn.classList.add("active");
         trendGran = btn.dataset.gran;
+        hiddenKeys.clear();            // fresh range: show all three series again
         loadTrend();
       });
     });
@@ -906,27 +1089,10 @@
   function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
 
-  // ---------- trend controls (mode switch, date range, type filter) ----------
+  // ---------- main chart controls (date range; Day/Week/Month lives in initGranularity) ----------
   function initTrendControls() {
-    document.querySelectorAll(".wsa-seg-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        if (btn.dataset.mode === trendMode) return;
-        document.querySelectorAll(".wsa-seg-btn").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        trendMode = btn.dataset.mode;
-        hiddenKeys.clear();          // reset per-view visibility
-        loadTrend();
-      });
-    });
     const days = document.getElementById("trendDays");
-    days?.addEventListener("change", () => { trendDays = parseInt(days.value, 10) || 0; loadTrend(); });
-
-    const fBtn = document.getElementById("typeFilterBtn");
-    const fMenu = document.getElementById("typeFilterMenu");
-    fBtn?.addEventListener("click", (e) => { e.stopPropagation(); fMenu.hidden = !fMenu.hidden; });
-    document.addEventListener("click", (e) => {
-      if (fMenu && !fMenu.hidden && !fMenu.contains(e.target) && e.target !== fBtn) fMenu.hidden = true;
-    });
+    days?.addEventListener("change", () => { trendDays = parseInt(days.value, 10) || 0; hiddenKeys.clear(); loadTrend(); });
   }
   initTrendControls();
   initGranularity();

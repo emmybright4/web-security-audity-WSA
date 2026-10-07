@@ -31,6 +31,12 @@
     "gosqli": "Authorized time-based SQL injection testing module.",
     "AI / LLM": "LLM analysis for explanations, summaries and fixes.",
   };
+  // Where "Configuration" should land for each tool (see settings.html anchors).
+  const CONFIG_LINKS = {
+    "OWASP ZAP": "/settings#zap", "ZAP-MCP": "/settings#zapmcp",
+    "Playwright": "/settings#engines", "Nuclei": "/settings#engines",
+    "gosqli": "/settings#engines", "AI / LLM": "/settings#ai",
+  };
   const STATUS_CLASS = { connected: "completed", disconnected: "pending", not_configured: "pending", error: "failed" };
 
   function esc(s) { return String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -55,7 +61,7 @@
             ${t.detail ? `<div class="wsa-hint mb-2">${esc(t.detail)}</div>` : ""}
             <div class="d-flex gap-2 mt-auto pt-2">
               <button class="btn btn-sm wsa-btn-ghost" onclick="testTool('${esc(t.name)}')"><i class="bi bi-arrow-repeat"></i> Test Connection</button>
-              <a class="btn btn-sm wsa-btn-ghost" href="/settings"><i class="bi bi-gear"></i> Configuration</a>
+              <a class="btn btn-sm wsa-btn-ghost" href="${CONFIG_LINKS[t.name] || "/settings"}"><i class="bi bi-gear"></i> Configuration</a>
             </div>
           </div>
         </div>`).join("");

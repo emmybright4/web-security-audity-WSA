@@ -228,18 +228,105 @@ body::-webkit-scrollbar, .wsa-nav::-webkit-scrollbar,
 .wsa-legend-name { color: var(--wsa-navy); flex: 1; }
 .wsa-legend-pct { font-size: 11.5px; color: var(--wsa-muted); font-weight: 700; background: var(--wsa-bg); border-radius: 999px; padding: 2px 8px; }
 
-/* Midnight neon trend panel */
-.wsa-trend-night {
-  background: radial-gradient(1200px 500px at 20% -10%, rgba(99, 102, 241, .16), transparent 60%),
-              linear-gradient(180deg, #0b1220 0%, #0a101d 100%);
-  border: 1px solid rgba(99, 102, 241, .22);
+/* Trend & live-findings panel: plain white - the series colours carry the design */
+.wsa-trend-panel {
+  background: #fff;
+  border: 1px solid var(--wsa-border);
   border-radius: 16px;
   padding: 18px 18px 12px;
-  box-shadow: inset 0 0 60px rgba(99, 102, 241, .07);
 }
-.wsa-trend-night .wsa-dot-legend-item { color: #dbe6fa; }
-.wsa-trend-night .wsa-dot-swatch { box-shadow: 0 0 0 3px rgba(148, 178, 255, .12); }
+.wsa-trend-panel .wsa-dot-legend-item { color: var(--wsa-navy); }
+.wsa-trend-panel .wsa-dot-swatch { box-shadow: 0 0 0 3px rgba(15, 42, 92, .06); }
 .wsa-trend-stage { position: relative; height: 340px; }
+
+/* Main dashboard chart: the mountain centerpiece. A black glass card with a
+   subtle blue/purple atmospheric glow in the style of the reference graph.
+   Data honesty applies as everywhere else: the Oct-Dec dotted "forecast tail"
+   of the reference is projected data, so it is intentionally not reproduced -
+   every plotted point is a real row from the database. */
+.wsa-mountain-card {
+  background:
+    radial-gradient(90% 130% at 8% -20%, rgba(108, 43, 255, .20), transparent 55%),
+    radial-gradient(70% 120% at 92% -10%, rgba(0, 191, 255, .12), transparent 55%),
+    radial-gradient(130% 150% at 50% 135%, rgba(255, 45, 170, .09), transparent 60%),
+    #04050b;
+  border: 1px solid rgba(129, 140, 248, .20);
+  box-shadow: 0 0 0 1px rgba(2, 6, 17, .6), 0 24px 60px rgba(2, 6, 23, .55);
+}
+.wsa-mountain-card .wsa-section-title { color: #f2f6ff; }
+.wsa-mountain-card .wsa-section-sub { color: #8fa3c8; }
+.wsa-mountain-card .wsa-toolbar-label { color: #7e8fb0; }
+.wsa-mountain-card .wsa-select {
+  background: rgba(10, 14, 30, .85);
+  border-color: rgba(148, 178, 255, .22);
+  color: #dbe6fa;
+}
+.wsa-mountain-card .wsa-select option { background: #0a0e1e; color: #dbe6fa; }
+.wsa-mountain-card .wsa-seg { background: rgba(148, 178, 255, .07); border-color: rgba(148, 178, 255, .16); }
+.wsa-mountain-card .wsa-seg-btn { color: #7e8fb0; }
+.wsa-mountain-card .wsa-seg-btn:hover { color: #dbe6fa; }
+.wsa-mountain-card .wsa-seg-btn.active { background: rgba(129, 140, 248, .28); color: #fff; box-shadow: none; }
+.wsa-mountain-card .wsa-btn-ghost { background: transparent; border-color: rgba(148, 178, 255, .25); color: #8fa3c8; }
+.wsa-mountain-card .wsa-chart-loading { color: #8fa3c8; }
+.wsa-mountain-card .wsa-chart-empty { color: #8fa3c8; }
+.wsa-mountain-card .wsa-chart-empty b { color: #dbe6fa; }
+.wsa-mountain-card .wsa-chart-error i { color: #fca5a5; }
+.wsa-mountain-card .wsa-chart-error b { color: #fca5a5; }
+.wsa-mountain-card .wsa-spinner { border-color: rgba(129, 140, 248, .25); border-top-color: #7c5cff; }
+/* The dark card carries the atmosphere; the inner chart panel stays frameless. */
+.wsa-trend-neon {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+/* Range/granularity controls in the mountain card header */
+.wsa-mountain-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* Taller stage for the full-width centerpiece */
+.wsa-trend-stage-tall { height: 440px; }
+@media (max-width: 991.98px) { .wsa-trend-stage-tall { height: 340px; } }
+/* Empty state: ghost mountains draw themselves in while the chart waits for
+   the first scan. Pure decoration - no data is implied. */
+.wsa-mountain-empty { padding: 30px 12px 22px; }
+.wsa-mountain-ghost {
+  width: min(680px, 94%); height: auto; display: block; margin: 0 auto 16px;
+  overflow: visible; animation: wsa-ghost-breathe 5s ease-in-out infinite;
+}
+.wsa-ghost-line {
+  fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round;
+  stroke-dasharray: 1500; stroke-dashoffset: 1500;
+  filter: drop-shadow(0 0 7px currentColor);
+  animation: wsa-ghost-draw 2.6s ease-out forwards;
+}
+.wsa-ghost-purple { color: #6C2BFF; }
+.wsa-ghost-cyan { color: #00BFFF; animation-delay: .3s; }
+.wsa-ghost-pink { color: #FF2DAA; animation-delay: .6s; }
+@keyframes wsa-ghost-draw { to { stroke-dashoffset: 0; } }
+@keyframes wsa-ghost-breathe { 0%, 100% { opacity: .75; } 50% { opacity: 1; } }
+.wsa-trend-neon .wsa-dot-legend-item { color: #dbe6fa; }
+.wsa-trend-neon .wsa-dot-swatch { box-shadow: 0 0 0 3px rgba(148, 178, 255, .14); }
+.wsa-trend-neon .wsa-dot-legend-more { color: #7e8fb0; }
+/* Floating glass header inside the neon trend panel. */
+.wsa-trend-neon-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
+  margin: 0 0 14px;
+}
+.wsa-trend-neon-kicker {
+  font-size: 12px; font-weight: 800; letter-spacing: 2.5px; color: #fff;
+}
+.wsa-trend-neon-sub { font-size: 12.5px; color: #8fa3c8; margin-top: 4px; }
+.wsa-trend-neon-live {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #5eead4;
+  border: 1px solid rgba(94, 234, 212, .35); border-radius: 999px;
+  padding: 5px 12px; background: rgba(20, 184, 166, .10); white-space: nowrap;
+}
+.wsa-trend-neon-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf;
+  box-shadow: 0 0 10px rgba(45, 212, 191, .95);
+  animation: wsa-live-ping 1.6s cubic-bezier(0, 0, .2, 1) infinite;
+}
+/* Neon-chart loading text must read on the dark panel. */
+.wsa-trend-neon .wsa-chart-loading { color: #8fa3c8; }
 
 /* Trend toolbar: mode switch, date range, type filter */
 .wsa-trend-toolbar { display: flex; align-items: center; gap: 10px; margin: 2px 0 12px; flex-wrap: wrap; }
@@ -295,15 +382,16 @@ body::-webkit-scrollbar, .wsa-nav::-webkit-scrollbar,
 }
 .wsa-live-seg .wsa-live-seg-btn:hover { color: var(--wsa-navy); }
 .wsa-live-seg .wsa-live-seg-btn.active { background: #fff; color: var(--wsa-blue); box-shadow: 0 2px 8px rgba(15, 42, 92, .1); }
-.wsa-dot-legend-more { font-size: 12px; color: #8fa3c8; align-self: center; }
+.wsa-dot-legend-more { font-size: 12px; color: var(--wsa-muted); align-self: center; }
 
 /* Dark floating tooltip (date header + dot rows) */
 #wsaTrendTip {
   position: absolute; z-index: 60; pointer-events: none;
   min-width: 170px; max-width: 280px;
-  background: var(--wsa-navy-3); color: #fff;
+  background: #05070f; color: #fff;
+  border: 1px solid rgba(148, 163, 184, .22);
   border-radius: 12px; padding: 12px 14px;
-  box-shadow: 0 14px 34px rgba(11, 31, 69, .4);
+  box-shadow: 0 14px 34px rgba(2, 6, 17, .6);
   opacity: 0; transition: opacity .12s ease;
   font-size: 12.5px;
 }

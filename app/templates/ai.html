@@ -48,7 +48,8 @@
         configured LLM provider for analysis. If AI is not configured, WSA never invents results -
         you'll see a clear setup message instead.
         <div class="wsa-banner-info mt-3">
-          Configure <b>AI_PROVIDER</b> and <b>AI_API_KEY</b> in <span class="wsa-mono">.env</span> to enable AI.
+          Configure <b>Provider</b> and <b>API key</b> on the <a href="/settings#ai">Settings page</a>
+          to enable AI — no restart needed.
         </div>
       </div>
     </div>
@@ -84,7 +85,7 @@
       const d = await WSA.api("/api/ai/status");
       $("aiStatus").textContent = d.configured ? "AI connected" : "Not configured";
       if (!d.configured) {
-        addMsg("bot", "AI integration is not configured. Add your LLM provider settings to enable AI analysis.\n\nSet AI_PROVIDER and AI_API_KEY in your .env file, then restart WSA.");
+        addMsg("bot", "AI integration is not configured. Add your LLM provider settings to enable AI analysis.\n\nOpen Settings > AI / LLM, choose a provider and paste an API key - it takes effect immediately.");
       } else {
         addMsg("bot", "Hello Emmy! I'm the WSA AI Assistant. I can analyze your latest scan, explain vulnerabilities, summarize findings and suggest fixes - all based on your real scan results.");
       }

@@ -18,6 +18,7 @@ from ..models import IPScan, IPScanHost, IPScanPort, IPScanVulnerability
 from ..services import notification_service
 from ..services.engines import ip_scanner
 from ._api_guard import api_login_required
+from ._scope import owns, user_id
 
 log = logging.getLogger("wsa.ip_scan")
 
@@ -54,9 +55,13 @@ def _next_scan_number():
         return _scan_counter
 
 
-def _emit(event, payload):
+def _emit(event, payload, room=None):
+    """Broadcast an IP-scan event to its owner's room (or everyone if no owner)."""
     try:
-        socketio.emit(event, payload)
+        if room:
+            socketio.emit(event, payload, room=room)
+        else:
+            socketio.emit(event, payload)
     except Exception:
         pass
 
@@ -98,11 +103,14 @@ def _run_ip_scan(scan_id):
     options = scan.options or {}
     target = scan.target
     started = time.time()
+    # Restrict live events to the owning account's room.
+    owner_room = f"user:{scan.user_id}" if scan.user_id else None
 
     _set_scan(scan, status="running", progress=2,
               started_at=datetime.now(timezone.utc),
               current_step="Initializing IP scanner", error_message="")
-    _emit("ip_scan_started", {"scan_id": scan_id, "target": target, "status": "running"})
+    _emit("ip_scan_started", {"scan_id": scan_id, "target": target, "status": "running"},
+          room=owner_room)
 
     def progress_cb(pct, label):
         if _is_cancelled(scan_id):
@@ -112,7 +120,8 @@ def _run_ip_scan(scan_id):
             if fresh:
                 _set_scan(fresh, progress=max(fresh.progress or 0, int(pct)),
                           current_step=label)
-            _emit("ip_scan_progress", {"scan_id": scan_id, "progress": int(pct), "step": label})
+            _emit("ip_scan_progress", {"scan_id": scan_id, "progress": int(pct), "step": label},
+                  room=owner_room)
         except _Cancelled:
             raise
         except Exception:
@@ -195,7 +204,7 @@ def _run_ip_scan(scan_id):
                 _emit("new_finding", {
                     "scan_id": scan_id, "name": f.get("name"),
                     "severity": sev, "host_ip": ip,
-                })
+                }, room=owner_room)
 
             host.vulnerabilities_count = vuln_count
             db.session.commit()
@@ -218,7 +227,7 @@ def _run_ip_scan(scan_id):
             "scan_id": scan_id, "status": "completed",
             "target": target, "scan_number": fresh.scan_number,
             "hosts": len(results), "vulnerabilities": total_vulns,
-        })
+        }, room=owner_room)
         log.info("IP scan %s completed: %d hosts, %d vulns in %.1fs",
                  scan_id, len(results), total_vulns, time.time() - started)
 
@@ -227,16 +236,25 @@ def _run_ip_scan(scan_id):
         if fresh:
             _set_scan(fresh, status="cancelled", current_step="Scan cancelled",
                       completed_at=datetime.now(timezone.utc))
-        _emit("ip_scan_completed", {"scan_id": scan_id, "status": "cancelled"})
+        _emit("ip_scan_completed", {"scan_id": scan_id, "status": "cancelled"},
+              room=owner_room)
     except Exception as exc:
         log.exception("IP scan %s failed", scan_id)
+        message = str(exc)
+        # Raised when the process was going down (Ctrl+C, or the dev reloader
+        # restarting after an edit) while the scanner still had work queued.
+        # Say that in operator terms instead of leaking stdlib internals.
+        if "cannot schedule new futures" in message:
+            message = ("The WSA server restarted while this scan was running, "
+                       "so it stopped before producing results. Start the scan again.")
         fresh = db.session.get(IPScan, scan_id)
         if fresh:
             _set_scan(fresh, status="failed", current_step="Scan failed",
-                      error_message=str(exc)[:1000],
+                      error_message=message[:1000],
                       completed_at=datetime.now(timezone.utc))
             _notify(notification_service.notify_ip_scan_failed, fresh)
-        _emit("ip_scan_completed", {"scan_id": scan_id, "status": "failed", "error": str(exc)[:300]})
+        _emit("ip_scan_completed", {"scan_id": scan_id, "status": "failed",
+                                    "error": message[:300]}, room=owner_room)
     finally:
         with _lock:
             _scan_threads.pop(scan_id, None)
@@ -256,7 +274,8 @@ def list_ip_scans():
     """List all IP scans, newest first."""
     try:
         limit = min(int(request.args.get("limit", 50)), 200)
-        scans = IPScan.query.order_by(desc(IPScan.created_at)).limit(limit).all()
+        scans = (IPScan.query.filter(IPScan.user_id == user_id())
+                 .order_by(desc(IPScan.created_at)).limit(limit).all())
         return jsonify(scans=[s.to_dict() for s in scans])
     except Exception as exc:
         return jsonify(error=f"Failed to list IP scans: {exc}"), 500
@@ -352,7 +371,7 @@ def create_ip_scan():
 def get_ip_scan(scan_id):
     """Get detailed IP scan results."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
 
     hosts = IPScanHost.query.filter_by(scan_id=scan_id).all()
@@ -373,7 +392,7 @@ def get_ip_scan(scan_id):
 def get_ip_scan_hosts(scan_id):
     """Get all hosts for an IP scan."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
     hosts = IPScanHost.query.filter_by(scan_id=scan_id).all()
     return jsonify(hosts=[h.to_dict() for h in hosts])
@@ -384,7 +403,7 @@ def get_ip_scan_hosts(scan_id):
 def get_ip_scan_ports(scan_id):
     """Get all open ports for an IP scan."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
     ports = IPScanPort.query.filter_by(scan_id=scan_id).all()
     return jsonify(ports=[p.to_dict() for p in ports])
@@ -395,7 +414,7 @@ def get_ip_scan_ports(scan_id):
 def get_ip_scan_vulns(scan_id):
     """Get all vulnerabilities for an IP scan."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
 
     # Filter by type if requested
@@ -420,7 +439,7 @@ def get_ip_scan_vulns(scan_id):
 def ip_vuln_trend(scan_id):
     """Get vulnerability distribution data for charts."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
 
     vulns = IPScanVulnerability.query.filter_by(scan_id=scan_id).all()
@@ -455,7 +474,8 @@ def ip_scan_history():
     """Get scan history with sequential numbering."""
     try:
         scans = (IPScan.query
-                 .filter(IPScan.status.in_(["completed", "failed", "cancelled"]))
+                 .filter(IPScan.user_id == user_id(),
+                         IPScan.status.in_(["completed", "failed", "cancelled"]))
                  .order_by(desc(IPScan.created_at)).limit(100).all())
         return jsonify(scans=[s.to_dict() for s in scans])
     except Exception as exc:
@@ -466,7 +486,8 @@ def ip_scan_history():
 @api_login_required
 def ip_scan_summary():
     """Get latest scan summary for the dashboard cards."""
-    latest = IPScan.query.filter_by(status="completed").order_by(desc(IPScan.created_at)).first()
+    latest = (IPScan.query.filter(IPScan.user_id == user_id(), IPScan.status == "completed")
+              .order_by(desc(IPScan.created_at)).first())
     if latest is None:
         return jsonify(
             hosts_discovered=0, open_ports=0, services_detected=0,
@@ -494,7 +515,7 @@ def ip_scan_summary():
 def cancel_ip_scan(scan_id):
     """Cancel a running IP scan."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
     if scan.status not in ("pending", "running"):
         return jsonify(error=f"Scan is already {scan.status}; cannot cancel."), 400
@@ -507,7 +528,7 @@ def cancel_ip_scan(scan_id):
 def delete_ip_scan(scan_id):
     """Delete an IP scan and its results."""
     scan = db.session.get(IPScan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="IP scan not found."), 404
     _request_cancel(scan_id)
     try:

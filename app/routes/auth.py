@@ -17,6 +17,8 @@ from flask import (Blueprint, jsonify, redirect, render_template, request,
 from flask_login import (UserMixin, current_user, login_user, logout_user,
                          login_required)
 
+from sqlalchemy.exc import IntegrityError
+
 from ..extensions import db, login_manager
 from ..models import (CHANNEL_EMAIL, CHANNEL_PHONE, PURPOSE_ACCOUNT_VERIFICATION,
                       PURPOSE_LOGIN_VERIFICATION, PURPOSE_PASSWORD_RESET,
@@ -43,6 +45,18 @@ LOGIN_PENDING_KEY = "pending_login_identity"
 RESET_REQUESTED_KEY = "reset_requested"
 
 VALID_CHANNELS = {CHANNEL_EMAIL, CHANNEL_PHONE}
+
+# Who is signing up. Picking a role keeps the workspace honest about who is
+# auditing what; "Other" lets a visitor describe themselves in a few words.
+ROLE_OPTIONS = [
+    "SOC Analyst",
+    "Penetration Tester",
+    "Security Engineer",
+    "System Administrator",
+    "Developer",
+    "IT Student",
+]
+ROLE_OTHER = "Other"
 
 
 class LoginUser(UserMixin):
@@ -230,7 +244,8 @@ def register_page():
         return redirect(url_for("main.dashboard"))
     return render_template("register.html", title="Create account",
                            countries=country_options(),
-                           default_country=default_country())
+                           default_country=default_country(),
+                           roles=ROLE_OPTIONS, role_other=ROLE_OTHER)
 
 
 @bp.get("/verify")
@@ -316,6 +331,10 @@ def register():
     if problem:
         return jsonify(error=problem), 400
 
+    role = _resolved_role(data)
+    if role is None:
+        return jsonify(error="Choose the role that describes you best."), 400
+
     email = phone = ""
     if channel == CHANNEL_EMAIL:
         email = str(data.get("email") or "").strip().lower()
@@ -330,7 +349,8 @@ def register():
 
     username = str(data.get("username") or "").strip() or _default_username(email, phone)
     if not 2 <= len(username) <= 80:
-        return jsonify(error="Username must be 2-80 characters.")
+        return jsonify(error="Enter a name of at least 2 characters, or leave it blank "
+                             "and we will use your email address."), 400
 
     conflict = (User.query.filter(db.func.lower(User.email) == email).first() if email
                 else User.query.filter_by(phone_number=phone).first())
@@ -343,14 +363,23 @@ def register():
         username=username,
         email=email or None,
         phone_number=phone or None,
-        role=str(data.get("role") or "").strip() or "IT Student",
+        role=role,
         email_verified=False,
         phone_verified=False,
         primary_auth_method=channel,
     )
     user.set_password(password)
     db.session.add(user)
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # A unique constraint fired (usually a sign-up that raced another for the
+        # same email/phone, or an out-of-date schema). Answer with a clear message
+        # instead of letting it become an opaque 500.
+        db.session.rollback()
+        return jsonify(error="That account could not be created because the email "
+                             "address or phone number is already registered. "
+                             "Try signing in instead."), 409
 
     if not verification_required():
         # No verification on this instance: the account is usable straight away -
@@ -381,6 +410,23 @@ def register():
     payload["next"] = url_for("auth.verify_page")
     payload["message"] = "Verification code sent."
     return jsonify(**payload), 201
+
+
+def _resolved_role(data):
+    """The role the visitor chose, or ``None`` when their answer is missing.
+
+    "Other" is replaced by the short description they typed, so the stored label
+    is still meaningful to whoever reads the account list later.
+    """
+    role = str(data.get("role") or "").strip()
+    if role == ROLE_OTHER:
+        custom = str(data.get("role_other") or "").strip()
+        if not 2 <= len(custom) <= 40:
+            return None
+        return custom
+    if role not in ROLE_OPTIONS:
+        return None
+    return role
 
 
 def _default_username(email, phone):

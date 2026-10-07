@@ -13,6 +13,7 @@ def _register(client, n):
     return client.post("/api/auth/register", json={
         "channel": "email",
         "email": f"user{n}@example.com",
+        "role": "SOC Analyst",
         "password": "secret123",
         "confirm_password": "secret123",
     })
@@ -38,6 +39,7 @@ def test_unconfigured_mail_never_returns_429(app, client):
 def test_missing_sms_provider_is_reported_clearly(app, client):
     resp = client.post("/api/auth/register", json={
         "channel": "phone", "phone_number": "788123456", "country": "RW",
+        "role": "SOC Analyst",
         "password": "secret123", "confirm_password": "secret123"})
     assert resp.status_code == 503
     assert "no SMS provider configured" in resp.get_json()["error"]

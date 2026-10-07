@@ -14,11 +14,12 @@ from app.services import scanner
 def _add_idle_scan(app, url="http://127.0.0.1:9"):
     """Insert a scan row that has no worker thread attached to it."""
     from app.extensions import db
-    from app.models import Scan
+    from app.models import Scan, User
 
     with app.app_context():
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
         scan = Scan(target_url=url, scan_type="quick", status="completed",
-                    progress=100, options={}, current_step="done")
+                    progress=100, options={}, current_step="done", user_id=owner.id)
         db.session.add(scan)
         db.session.commit()
         return scan.id
@@ -67,11 +68,12 @@ def test_new_scan_is_not_cancelled_by_a_deleted_one(app, auth_client):
 def test_ip_scan_delete_leaves_no_cancellation_flag(app, auth_client):
     """The IP scanner keeps its own flag and had the same defect."""
     from app.extensions import db
-    from app.models import IPScan
+    from app.models import IPScan, User
 
     with app.app_context():
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
         scan = IPScan(target="127.0.0.1", scan_profile="quick", status="completed",
-                      scan_number=99, options={})
+                      scan_number=99, options={}, user_id=owner.id)
         db.session.add(scan)
         db.session.commit()
         scan_id = scan.id
