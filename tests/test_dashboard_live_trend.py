@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta, timezone
 
 from app.extensions import db
-from app.models import Scan, Vulnerability
+from app.models import Scan, User, Vulnerability
 
 
 def _utcnow():
@@ -11,9 +11,16 @@ def _utcnow():
 
 
 def _add_finding(app, name, minutes_ago=0, days_ago=0, severity="informational"):
+    # Findings are scoped through their scan, so the row needs an owner.
     with app.app_context():
-        row = Vulnerability(name=name, severity=severity, created_at=(
-            _utcnow() - timedelta(minutes=minutes_ago, days=days_ago)))
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
+        scan = Scan(target_url="https://live.test", scan_type="quick",
+                    status="completed", user_id=owner.id)
+        db.session.add(scan)
+        db.session.flush()
+        row = Vulnerability(name=name, severity=severity, scan_id=scan.id,
+                            created_at=(_utcnow() - timedelta(
+                                minutes=minutes_ago, days=days_ago)))
         db.session.add(row)
         db.session.commit()
         return row.id
@@ -104,7 +111,9 @@ def test_only_the_busiest_categories_are_returned(auth_client, app):
 
 def test_scanning_flag_reflects_a_running_scan(auth_client, app):
     with app.app_context():
-        scan = Scan(target_url="http://127.0.0.1:8765", scan_type="quick", status="running")
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
+        scan = Scan(target_url="http://127.0.0.1:8765", scan_type="quick",
+                    status="running", user_id=owner.id)
         db.session.add(scan)
         db.session.commit()
         scan_id = scan.id

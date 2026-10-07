@@ -43,6 +43,18 @@ def client(app):
     return app.test_client()
 
 
+@pytest.fixture()
+def default_user_id(app):
+    """Id of the seeded account that ``auth_client`` signs in as.
+
+    Scans and findings inserted directly in a test must carry this id: every
+    query is scoped to the signed-in user, so an unowned row is invisible.
+    """
+    from app.models import User
+    with app.app_context():
+        return User.query.filter_by(email="emmy.bright@wsa.local").first().id
+
+
 @pytest.fixture(autouse=True)
 def _shipped_auth_policy(app):
     """Pin the shipped security policy; a developer's .env must not change it.
@@ -130,7 +142,8 @@ def register_and_verify(client, otp_box, *, channel="email", username="Test User
                         country="RW", password="secret123", accept=True):
     """Run the real sign-up flow and answer the real OTP challenge."""
     payload = {"username": username, "password": password,
-               "confirm_password": password, "channel": channel}
+               "confirm_password": password, "channel": channel,
+               "role": "SOC Analyst"}
     if channel == "email":
         payload["email"] = email
     else:

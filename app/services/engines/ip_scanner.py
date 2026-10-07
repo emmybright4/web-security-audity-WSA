@@ -45,6 +45,14 @@ STANDARD_PORTS = QUICK_PORTS + [
 
 FULL_PORTS = list(range(1, 1025)) + STANDARD_PORTS[::2]  # 1-1024 + extras
 
+# Ports probed during host discovery. Deliberately wider than the old
+# 80/443/22/445: a host whose only open service is RDP, a proxy or a database
+# was previously judged "down" and the whole scan returned nothing.
+DISCOVERY_PORTS = [
+    21, 22, 23, 25, 53, 80, 110, 135, 139, 143, 443, 445, 993, 995,
+    1433, 1521, 2049, 3306, 3389, 5432, 5900, 6379, 8080, 8443, 27017,
+]
+
 # OS fingerprint patterns (TCP window size + TTL heuristic)
 OS_FINGERPRINTS = [
     {"match": {"ttl_min": 64, "ttl_max": 64}, "name": "Linux/Unix"},
@@ -126,20 +134,31 @@ def _get_ports_for_profile(profile, custom_ports=None):
     return QUICK_PORTS
 
 
-def _is_host_alive(ip, timeout=1.5):
-    """Quick host alive check: try connecting to common ports."""
-    check_ports = [80, 443, 22, 445]
-    for port in check_ports:
+def _is_host_alive(ip, timeout=1.5, ports=None):
+    """Quick host alive check: try connecting to a set of ports.
+
+    ``ports`` defaults to the discovery set; callers scanning a specific
+    profile pass those ports so a host with only unusual services open is still
+    recognised as up.
+    """
+    check_ports = ports or DISCOVERY_PORTS
+
+    def _probe(port):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.settimeout(timeout)
             result = sock.connect_ex((ip, port))
             sock.close()
-            if result == 0:
-                return True
+            return result == 0
         except Exception:
-            pass
-    return False
+            return False
+
+    # Probed in parallel: a host that filters every port used to cost
+    # len(check_ports) * timeout (25s with the discovery set) one port at a time.
+    # Now the whole host costs roughly a single timeout.
+    workers = min(8, max(1, len(check_ports)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return any(executor.map(_probe, check_ports))
 
 
 def _is_host_alive_icmp(ip, timeout=1):
@@ -641,44 +660,27 @@ def scan_ip_target(ip, ports, options, progress_cb=None):
     except (socket.herror, socket.gaierror, OSError):
         pass
 
-    # Host alive check
-    alive = _is_host_alive(ip, timeout=1.5)
-    if not alive:
-        alive = _is_host_alive_icmp(ip, timeout=1)
-    if not alive:
-        # Final TCP probe on scan ports
-        for p in ports[:5]:
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(1)
-                if sock.connect_ex((ip, p)) == 0:
-                    alive = True
-                    sock.close()
-                    break
-                sock.close()
-            except Exception:
-                pass
-
-    if not alive:
-        host_data["status"] = "down"
-        return host_data, findings
-
-    host_data["status"] = "up"
-
-    # Port scanning
+    # Port scanning first: an open port is itself proof the host is up, and it
+    # removes the old sequential 4-port probe that made a single host take
+    # seconds and a /24 take many minutes before scanning even started.
     open_ports = []
 
     def _scan_port(port):
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(2)
+            # A closed port answers instantly (RST); only a *filtered* port waits
+            # the full timeout, so a shorter timeout mostly cuts dead time.
+            sock.settimeout(1.0)
             result = sock.connect_ex((ip, port))
             sock.close()
             return port, result == 0
         except Exception:
             return port, False
 
-    with ThreadPoolExecutor(max_workers=30) as executor:
+    # Wider pool: the "full" profile is ~1000 ports, which at 30 workers and a
+    # 2s timeout could take over a minute per host.
+    workers = min(64, max(1, len(ports)))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {executor.submit(_scan_port, p): p for p in ports}
         for future in as_completed(futures):
             port, is_open = future.result()
@@ -686,21 +688,35 @@ def scan_ip_target(ip, ports, options, progress_cb=None):
                 open_ports.append(port)
 
     open_ports.sort()
+
+    # No open ports among those scanned: fall back to a lightweight alive probe
+    # so a host that only filtered the scanned ports is still not mislabelled.
+    if not open_ports:
+        alive = _is_host_alive(ip, timeout=1.5, ports=ports[:20])
+        if not alive:
+            alive = _is_host_alive_icmp(ip, timeout=1)
+        if not alive:
+            host_data["status"] = "down"
+            return host_data, findings
+
+    host_data["status"] = "up"
     host_data["open_ports"] = open_ports
     host_data["open_ports_count"] = len(open_ports)
 
-    # Service detection + banner grabbing
-    services = []
-    for port in open_ports:
-        banner = _grab_banner(ip, port, timeout=2)
+    # Service detection + banner grabbing, in parallel: each banner could wait
+    # up to its timeout, so doing them one by one made a host with many open
+    # ports take tens of seconds.
+    def _probe_service(port):
+        banner = _grab_banner(ip, port, timeout=1.5)
         service = _detect_service(ip, port, banner)
         version = _detect_version(banner, service)
-        services.append({
-            "port": port,
-            "service": service,
-            "version": version,
-            "banner": banner,
-        })
+        return {"port": port, "service": service, "version": version, "banner": banner}
+
+    if open_ports:
+        with ThreadPoolExecutor(max_workers=min(16, len(open_ports))) as executor:
+            services = list(executor.map(_probe_service, open_ports))
+    else:
+        services = []
     host_data["services"] = services
 
     # OS detection (basic)
@@ -811,15 +827,32 @@ def scan_network(target, options, progress_cb=None):
     all_findings = []
     hosts_discovered = 0
 
-    # Phase 1: Host Discovery
+    # Phase 1: Host Discovery - hosts are probed concurrently across the ports
+    # this profile will scan, so a host is recognised as up even when its only
+    # open service is not one of the classic web/ssh ports. Sequential probing
+    # of a /24 could take many minutes before a single port was scanned.
     _cb(5, f"Discovering hosts (0/{total_hosts})")
-    alive_ips = []
-    for i, ip in enumerate(ips):
-        if progress_cb and i % 10 == 0:
-            pct = 5 + int(20 * i / total_hosts)
-            _cb(pct, f"Discovering hosts ({i}/{total_hosts})")
-        if _is_host_alive(ip, timeout=1.0):
-            alive_ips.append(ip)
+    discovery_ports = list(dict.fromkeys(ports))[:25]
+    alive_set = set()
+    done = 0
+    # 24 hosts at a time: each probe fans out to a small per-host pool, so a
+    # higher host count here would spawn hundreds of threads for little gain.
+    with ThreadPoolExecutor(max_workers=24) as executor:
+        futures = {executor.submit(_is_host_alive, ip, 1.0, discovery_ports): ip
+                   for ip in ips}
+        for future in as_completed(futures):
+            ip = futures[future]
+            try:
+                if future.result():
+                    alive_set.add(ip)
+            except Exception:
+                pass
+            done += 1
+            if progress_cb and (done % 10 == 0 or done == total_hosts):
+                pct = 5 + int(20 * done / total_hosts)
+                _cb(pct, f"Discovering hosts ({done}/{total_hosts})")
+    # Preserve the caller's order for stable, comparable results.
+    alive_ips = [ip for ip in ips if ip in alive_set]
 
     if not alive_ips:
         _cb(100, "Scan complete - no hosts found")
@@ -833,14 +866,29 @@ def scan_network(target, options, progress_cb=None):
 
     hosts_discovered = len(alive_ips)
 
-    # Phase 2: Port Scanning + Service Detection + Vulnerability Analysis
-    for i, ip in enumerate(alive_ips):
-        host_pct = 25 + int(70 * i / hosts_discovered)
-        _cb(host_pct, f"Scanning {ip} ({i+1}/{hosts_discovered})")
+    # Phase 2: Port Scanning + Service Detection + Vulnerability Analysis.
+    # Hosts are scanned concurrently; sequentially, a /24 took the full scan
+    # time of every host added together.
+    def _scan_one(index_ip):
+        index, ip = index_ip
+        host_data, _ = scan_ip_target(ip, ports, options)
+        return index, host_data
 
-        host_data, findings = scan_ip_target(ip, ports, options)
-        results.append(host_data)
-        all_findings.extend(findings)
+    scanned = {}
+    completed = 0
+    with ThreadPoolExecutor(max_workers=min(8, max(1, hosts_discovered))) as executor:
+        futures = [executor.submit(_scan_one, (i, ip))
+                   for i, ip in enumerate(alive_ips)]
+        for future in as_completed(futures):
+            index, host_data = future.result()
+            scanned[index] = host_data
+            completed += 1
+            host_pct = 25 + int(70 * completed / hosts_discovered)
+            _cb(host_pct, f"Scanned {host_data.get('ip_address')} "
+                           f"({completed}/{hosts_discovered})")
+
+    results = [scanned[i] for i in range(hosts_discovered) if i in scanned]
+    all_findings = [f for host in results for f in host.get("findings", [])]
 
     _cb(98, "Finalizing results")
 

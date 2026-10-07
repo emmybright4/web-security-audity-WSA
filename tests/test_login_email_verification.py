@@ -267,6 +267,7 @@ def test_registration_needs_no_code_when_verification_is_off(app, client, otp_bo
 
     resp = client.post("/api/auth/register", json={
         "channel": "email", "email": "nolink@wsa.local", "username": "No Verifier",
+        "role": "SOC Analyst",
         "password": PASSWORD, "confirm_password": PASSWORD})
 
     assert resp.status_code == 200, resp.get_data(as_text=True)

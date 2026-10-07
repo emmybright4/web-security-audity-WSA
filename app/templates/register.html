@@ -90,6 +90,26 @@
           <input id="username" type="text" autocomplete="name" placeholder="e.g. Emmy Bright">
         </div>
 
+        <label class="wsa-label" for="role">Your role</label>
+        <div class="auth-field">
+          <i class="bi bi-person-badge"></i>
+          <select id="role" required>
+            <option value="" disabled selected>Select your role…</option>
+            {% for r in roles %}
+            <option value="{{ r }}">{{ r }}</option>
+            {% endfor %}
+            <option value="{{ role_other }}">Other</option>
+          </select>
+        </div>
+        <div id="panelRoleOther" hidden>
+          <label class="wsa-label" for="roleOther">Tell us your role</label>
+          <div class="auth-field">
+            <i class="bi bi-pencil"></i>
+            <input id="roleOther" type="text" maxlength="40"
+                   placeholder="e.g. Compliance Officer">
+          </div>
+        </div>
+
         <label class="wsa-label" for="password">Password</label>
         <div class="auth-field">
           <i class="bi bi-lock"></i>
@@ -174,6 +194,16 @@
   $("phone").addEventListener("input", updatePhonePreview);
   $("country").addEventListener("change", updatePhonePreview);
 
+  // "Other" reveals a short free-text field so the role is still meaningful.
+  function syncRoleOther() {
+    const other = $("role").value === "{{ role_other }}";
+    $("panelRoleOther").hidden = !other;
+    $("roleOther").required = other;
+    if (!other) $("roleOther").value = "";
+  }
+  $("role").addEventListener("change", syncRoleOther);
+  syncRoleOther();
+
   // ---------- password visibility ----------
   document.querySelectorAll(".auth-eye").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -216,12 +246,20 @@
     if (!$("accept").checked) { showError("Please accept the Terms and Privacy Policy."); return; }
     if ($("password").value !== $("confirm").value) { showError("Passwords do not match."); return; }
 
+    const role = $("role").value;
+    if (!role) { showError("Choose the role that describes you best."); return; }
+    if (role === "{{ role_other }}" && $("roleOther").value.trim().length < 2) {
+      showError("Tell us your role in a few words."); return;
+    }
+
     const body = {
       channel: channel,
       username: $("username").value.trim(),
+      role: role,
       password: $("password").value,
       confirm_password: $("confirm").value,
     };
+    if (role === "{{ role_other }}") body.role_other = $("roleOther").value.trim();
     if (channel === "email") {
       body.email = $("email").value.trim();
       if (!body.email) { showError("Enter your email address."); return; }

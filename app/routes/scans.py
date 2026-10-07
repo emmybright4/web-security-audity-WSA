@@ -10,6 +10,7 @@ from ..models import Scan, ScanTemplate, Vulnerability
 from ..services import scanner
 from ..utils import is_valid_url, normalize_url
 from ._api_guard import api_login_required
+from ._scope import owns, user_id
 
 log = logging.getLogger("wsa.scans")
 
@@ -23,7 +24,8 @@ VALID_TYPES = {"quick", "full", "custom"}
 def list_scans():
     try:
         limit = min(int(request.args.get("limit", 50)), 200)
-        scans = Scan.query.order_by(desc(Scan.created_at)).limit(limit).all()
+        scans = (Scan.query.filter(Scan.user_id == user_id())
+                 .order_by(desc(Scan.created_at)).limit(limit).all())
         return jsonify(scans=[s.to_dict() for s in scans])
     except Exception as exc:
         log.exception("list scans failed")
@@ -112,7 +114,8 @@ def _create_scan_from_data(data):
 @api_login_required
 def get_scan(scan_id):
     scan = db.session.get(Scan, scan_id)
-    if scan is None:
+    if not owns(scan):
+        # Someone else's scan is reported as missing, never as forbidden.
         return jsonify(error="Scan not found."), 404
     vulns = (Vulnerability.query.filter_by(scan_id=scan_id)
              .order_by(Vulnerability.created_at.desc()).all())
@@ -123,7 +126,7 @@ def get_scan(scan_id):
 @api_login_required
 def cancel_scan(scan_id):
     scan = db.session.get(Scan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="Scan not found."), 404
     if scan.status not in ("pending", "running"):
         return jsonify(error=f"Scan is already {scan.status}; cannot cancel."), 400
@@ -135,7 +138,7 @@ def cancel_scan(scan_id):
 @api_login_required
 def delete_scan(scan_id):
     scan = db.session.get(Scan, scan_id)
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="Scan not found."), 404
     scanner.request_cancel(scan_id)
     try:
