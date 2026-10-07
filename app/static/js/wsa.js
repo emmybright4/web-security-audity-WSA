@@ -90,6 +90,17 @@
   }
 
   // ---------- api ----------
+  // Some failures never reach a JSON error handler: a crash in debug mode
+  // returns an HTML traceback page, and a proxy can return a bare status. Show
+  // the visitor something human instead of "Request failed (500)".
+  function friendlyHttpError(status) {
+    if (status >= 500) return "Something went wrong on our side. Please try again in a moment.";
+    if (status === 404) return "We could not find what you asked for. Please refresh and try again.";
+    if (status === 403) return "You are not allowed to do that.";
+    if (status === 429) return "Too many attempts. Please wait a little and try again.";
+    return `That did not work (error ${status}). Please try again.`;
+  }
+
   WSA.api = async function api(url, opts = {}) {
     const resp = await fetch(url, {
       credentials: "include",
@@ -98,7 +109,7 @@
     });
     let data = {};
     try { data = await resp.json(); } catch (_) { /* non-JSON */ }
-    if (!resp.ok) throw new Error(data.error || `Request failed (${resp.status})`);
+    if (!resp.ok) throw new Error(data.error || friendlyHttpError(resp.status));
     return data;
   };
 

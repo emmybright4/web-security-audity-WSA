@@ -9,11 +9,13 @@ import pytest
 def _add_network_finding(app, ip="192.168.1.50", name="SMB Service Exposed"):
     """Insert a completed IP scan with one high-severity finding."""
     from app.extensions import db
-    from app.models import IPScan, IPScanHost, IPScanVulnerability
+    from app.models import IPScan, IPScanHost, IPScanVulnerability, User
 
     with app.app_context():
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
         scan = IPScan(target=ip, scan_profile="quick", status="completed",
-                      scan_number=1, vulnerabilities_count=1, high_count=1)
+                      scan_number=1, vulnerabilities_count=1, high_count=1,
+                      user_id=owner.id)
         db.session.add(scan)
         db.session.flush()
 
@@ -32,11 +34,16 @@ def _add_network_finding(app, ip="192.168.1.50", name="SMB Service Exposed"):
 
 def _add_web_finding(app, name="Missing CSP Header"):
     from app.extensions import db
-    from app.models import Vulnerability
+    from app.models import Scan, User, Vulnerability
 
     with app.app_context():
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
+        scan = Scan(target_url="https://example.test", scan_type="quick",
+                    status="completed", user_id=owner.id)
+        db.session.add(scan)
+        db.session.flush()
         vuln = Vulnerability(name=name, severity="medium", status="open",
-                             target_url="https://example.test")
+                             scan_id=scan.id, target_url="https://example.test")
         db.session.add(vuln)
         db.session.commit()
         return vuln.id
@@ -114,12 +121,18 @@ def test_limit_keeps_the_newest_findings(app, auth_client):
     from datetime import datetime, timedelta
 
     from app.extensions import db
-    from app.models import Vulnerability
+    from app.models import Scan, User, Vulnerability
 
     with app.app_context():
+        owner = User.query.filter_by(email="emmy.bright@wsa.local").first()
+        scan = Scan(target_url="https://ordered.test", scan_type="quick",
+                    status="completed", user_id=owner.id)
+        db.session.add(scan)
+        db.session.flush()
         base = datetime(2026, 1, 1, 12, 0, 0)
         for i in range(30):
             db.session.add(Vulnerability(
+                scan_id=scan.id,
                 name="Finding %02d" % i, severity="low", status="open",
                 target_url="https://ordered.test",
                 created_at=base + timedelta(minutes=i)))

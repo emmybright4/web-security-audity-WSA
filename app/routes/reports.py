@@ -9,16 +9,25 @@ from ..models import Report, Scan, Vulnerability
 from ..services import notification_service
 from ..services.report_service import generate_report, render_html_report
 from ._api_guard import api_login_required
+from ._scope import owns, user_id
 from .auth import current_row
 
 bp = Blueprint("reports", __name__, url_prefix="/api/reports")
+
+
+def _report_owned(report):
+    """A report belongs to whoever owns the scan it was generated from."""
+    parent = report.scan if report is not None else None
+    return parent is not None and parent.user_id == user_id()
 
 
 @bp.get("")
 @api_login_required
 def list_reports():
     try:
-        rows = Report.query.order_by(desc(Report.generated_at)).limit(200).all()
+        rows = (Report.query.join(Scan, Report.scan_id == Scan.id)
+                .filter(Scan.user_id == user_id())
+                .order_by(desc(Report.generated_at)).limit(200).all())
         return jsonify(reports=[r.to_dict() for r in rows])
     except Exception as exc:
         return jsonify(error=f"Failed to list reports: {exc}"), 500
@@ -30,7 +39,7 @@ def generate():
     data = request.get_json(silent=True) or {}
     scan_id = data.get("scan_id")
     scan = db.session.get(Scan, scan_id) if scan_id else None
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="A valid scan_id is required to generate a report."), 400
 
     vulns = Vulnerability.query.filter_by(scan_id=scan.id).all()
@@ -51,7 +60,7 @@ def generate():
 @api_login_required
 def download(report_id):
     r = db.session.get(Report, report_id)
-    if r is None or not os.path.exists(r.report_path):
+    if not _report_owned(r) or not os.path.exists(r.report_path):
         return jsonify(error="Report file not found."), 404
     return send_file(r.report_path, as_attachment=True, mimetype="application/pdf",
                      download_name=r.report_name)
@@ -61,7 +70,7 @@ def download(report_id):
 @api_login_required
 def view(report_id):
     r = db.session.get(Report, report_id)
-    if r is None or not os.path.exists(r.report_path):
+    if not _report_owned(r) or not os.path.exists(r.report_path):
         return jsonify(error="Report file not found."), 404
     return send_file(r.report_path, mimetype="application/pdf")
 
@@ -70,7 +79,7 @@ def view(report_id):
 @api_login_required
 def delete(report_id):
     r = db.session.get(Report, report_id)
-    if r is None:
+    if not _report_owned(r):
         return jsonify(error="Report not found."), 404
     try:
         if os.path.exists(r.report_path):
@@ -92,7 +101,8 @@ def report_recipients():
     user = current_row()
     return jsonify(recipients=notification_service.verified_recipients(user),
                    scans=[{"id": s.id, "target_url": s.target_url, "status": s.status}
-                          for s in Scan.query.order_by(desc(Scan.created_at)).limit(50).all()])
+                          for s in Scan.query.filter(Scan.user_id == user_id())
+                          .order_by(desc(Scan.created_at)).limit(50).all()])
 
 
 @bp.post("/email")
@@ -101,7 +111,7 @@ def email_report():
     """Generate (if needed) and email a report to verified recipients."""
     data = request.get_json(silent=True) or {}
     scan = db.session.get(Scan, data.get("scan_id")) if data.get("scan_id") else None
-    if scan is None:
+    if not owns(scan):
         return jsonify(error="A valid scan_id is required."), 400
     fmt = str(data.get("format") or "pdf").strip().lower()
     if fmt not in ("pdf", "html"):

@@ -7,6 +7,7 @@ from sqlalchemy import desc, func
 from ..extensions import db
 from ..models import Scan, Vulnerability
 from ._api_guard import api_login_required
+from ._scope import user_id
 
 bp = Blueprint("targets", __name__, url_prefix="/api/targets")
 
@@ -15,7 +16,8 @@ bp = Blueprint("targets", __name__, url_prefix="/api/targets")
 @api_login_required
 def list_targets():
     try:
-        scans = Scan.query.order_by(desc(Scan.created_at)).all()
+        scans = (Scan.query.filter(Scan.user_id == user_id())
+                 .order_by(desc(Scan.created_at)).all())
         targets = {}
         for s in scans:
             t = targets.setdefault(s.target_url, {
@@ -28,6 +30,8 @@ def list_targets():
                 t["last_status"] = s.status
         for row in (db.session.query(Vulnerability.target_url, Vulnerability.severity,
                                      func.count(Vulnerability.id))
+                    .join(Scan, Vulnerability.scan_id == Scan.id)
+                    .filter(Scan.user_id == user_id())
                     .group_by(Vulnerability.target_url, Vulnerability.severity).all()):
             if row[0] in targets:
                 g = ("high" if row[1] in ("high", "critical")
@@ -51,6 +55,7 @@ def list_targets():
 def target_scans(target_url):
     try:
         scans = (Scan.query.filter_by(target_url=target_url)
+                 .filter(Scan.user_id == user_id())
                  .order_by(desc(Scan.created_at)).limit(100).all())
         return jsonify(scans=[s.to_dict() for s in scans])
     except Exception as exc:

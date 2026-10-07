@@ -1,9 +1,11 @@
 """AI Assistant API. Uses real findings from the DB; fails honestly when AI is not configured."""
 from flask import Blueprint, current_app, jsonify, request
 
+from ..extensions import db
 from ..models import Scan, Vulnerability
 from ..services.engines import ai_service
 from ._api_guard import api_login_required
+from ._scope import owns, user_id
 
 bp = Blueprint("ai", __name__, url_prefix="/api/ai")
 
@@ -30,9 +32,11 @@ def analyze():
     scan_id = data.get("scan_id")
     question = (data.get("question") or "").strip()[:2000]
 
-    query = Vulnerability.query
+    query = (Vulnerability.query
+             .join(Scan, Vulnerability.scan_id == Scan.id)
+             .filter(Scan.user_id == user_id()))
     if scan_id:
-        if db.session.get(Scan, scan_id) is None:
+        if not owns(db.session.get(Scan, scan_id)):
             return jsonify(error=f"Scan #{scan_id} not found."), 404
         query = query.filter(Vulnerability.scan_id == scan_id)
     findings = query.order_by(Vulnerability.created_at.desc()).limit(80).all()

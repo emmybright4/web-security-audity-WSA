@@ -34,3 +34,7 @@ tools/
 
 # Logs
 *.log
+*.err
+
+# Local scratch / debug scripts
+_check_tools.py

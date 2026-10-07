@@ -25,6 +25,13 @@ class Config:
     ZAP_API_URL = os.getenv("ZAP_API_URL", "").strip()
     ZAP_API_KEY = os.getenv("ZAP_API_KEY", "").strip()
     ZAP_ENABLED = _bool("ZAP_ENABLED", "true")
+    # Optional MCP endpoint for the ZAP-MCP card. When empty the card falls back
+    # to native ZAP API mode (see services/engines/zap_mcp.py).
+    ZAP_MCP_URL = os.getenv("ZAP_MCP_URL", "").strip()
+    # Launch tools/start-zap.bat in the background when ZAP is not yet reachable,
+    # so the Tools page keeps a live status after a reboot.
+    ZAP_AUTOSTART = _bool("ZAP_AUTOSTART", "true")
+    ZAP_AUTOSTART_TIMEOUT = int(os.getenv("ZAP_AUTOSTART_TIMEOUT", "180"))
 
     PLAYWRIGHT_ENABLED = _bool("PLAYWRIGHT_ENABLED", "true")
     PLAYWRIGHT_MAX_PAGES = int(os.getenv("PLAYWRIGHT_MAX_PAGES", "12"))

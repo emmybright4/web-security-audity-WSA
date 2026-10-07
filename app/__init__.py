@@ -1,6 +1,7 @@
 """WSA application factory."""
 import logging
 import os
+import threading
 
 from flask import Flask, jsonify
 from flask_cors import CORS
@@ -47,13 +48,17 @@ def create_app(config_class=Config):
     with app.app_context():
         db.create_all()
         _ensure_columns()
+        _relax_users_email_nullable()
         _seed_defaults(app)
+        _recover_interrupted_ip_scans(app)
         _backfill_verification(app)
         from .routes.settings import apply_db_settings
         apply_db_settings(app)  # DB engine settings win over .env
         # Ensure IP scan tables exist (for upgrades from older DBs)
         from .models import IPScan, IPScanHost, IPScanPort, IPScanVulnerability  # noqa: F401
         db.create_all()
+
+    _start_zap_daemon(app)
 
     @app.errorhandler(404)
     def not_found(_e):
@@ -92,6 +97,22 @@ def create_app(config_class=Config):
     return app
 
 
+def _start_zap_daemon(app):
+    """Bring up the bundled ZAP daemon in the background (optional engine).
+
+    Runs detached so boot never blocks on the JVM: the Tools page keeps
+    reporting the real state either way. Opt out with ZAP_AUTOSTART=false.
+    """
+    if not app.config.get("ZAP_AUTOSTART", True):
+        return
+
+    def _worker():
+        from .services.engines import zap_daemon
+        zap_daemon.ensure_started(app.config)
+
+    threading.Thread(target=_worker, name="zap-autostart", daemon=True).start()
+
+
 def _seed_defaults(app):
     """Create default user + tool rows on first run."""
     from .models import ToolIntegration, User
@@ -106,6 +127,31 @@ def _seed_defaults(app):
         if not ToolIntegration.query.filter_by(name=name).first():
             db.session.add(ToolIntegration(name=name, status="not_configured"))
     db.session.commit()
+
+
+def _recover_interrupted_ip_scans(app):
+    """Finish IP scans whose worker died with the previous process.
+
+    A scan only reaches a terminal state while its worker thread is alive. Stop
+    the dev server (Ctrl+C) or let the reloader restart it after an edit and the
+    row keeps its last status forever: the page then shows a phantom active
+    scan, no results and no explanation. Nothing in a fresh process owns those
+    rows, so at startup they are closed out here with a message the operator can
+    act on.
+    """
+    from .models import IPScan, utcnow
+
+    stale = IPScan.query.filter(IPScan.status.in_(("pending", "running"))).all()
+    for scan in stale:
+        scan.status = "failed"
+        scan.current_step = "Interrupted"
+        scan.error_message = ("The WSA server restarted while this scan was running, "
+                              "so it stopped before producing results. Start the scan again.")
+        scan.completed_at = utcnow()
+    if stale:
+        db.session.commit()
+        log.info("Marked %d interrupted IP scan(s) as failed.", len(stale))
+    return len(stale)
 
 
 def _backfill_verification(app):
@@ -174,3 +220,81 @@ def _ensure_columns():
             db.session.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
             log.info("Added missing column %s.%s", table, name)
     db.session.commit()
+
+
+# Every column of ``users`` as the model now defines it. Used to rebuild the
+# table on an upgraded database (see ``_relax_users_email_nullable``).
+_USER_COLUMNS = [
+    ("id", "INTEGER NOT NULL"),
+    ("username", "VARCHAR(80) NOT NULL"),
+    ("email", "VARCHAR(120)"),
+    ("phone_number", "VARCHAR(20)"),
+    ("password_hash", "VARCHAR(255) NOT NULL"),
+    ("role", "VARCHAR(40)"),
+    ("email_verified", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("phone_verified", "BOOLEAN NOT NULL DEFAULT 0"),
+    ("primary_auth_method", "VARCHAR(10) NOT NULL DEFAULT 'email'"),
+    ("is_active", "BOOLEAN NOT NULL DEFAULT 1"),
+    ("last_login_at", "DATETIME"),
+    ("last_login_ip", "VARCHAR(64) DEFAULT ''"),
+    ("created_at", "DATETIME NOT NULL"),
+    ("updated_at", "DATETIME"),
+]
+
+
+def _relax_users_email_nullable():
+    """Let an account be created with a phone number and no email address.
+
+    ``users.email`` was ``NOT NULL`` before phone sign-up existed, and
+    ``create_all`` never relaxes an existing column. So on an upgraded database a
+    phone-only sign-up failed with an IntegrityError - surfaced as a bare HTTP
+    500 - while a fresh database worked. SQLite cannot drop NOT NULL in place, so
+    an affected table is rebuilt once, preserving every row.
+    """
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(db.engine)
+    if "users" not in inspector.get_table_names():
+        return
+    existing = {c["name"]: c for c in inspector.get_columns("users")}
+    email = existing.get("email")
+    if email is None or email.get("nullable", True):
+        return  # already optional - nothing to do
+
+    if db.engine.dialect.name == "sqlite":
+        _rebuild_sqlite_users(existing)
+    else:
+        db.session.execute(text("ALTER TABLE users ALTER COLUMN email DROP NOT NULL"))
+        db.session.commit()
+    log.info("Relaxed users.email so phone-only accounts can be created.")
+
+
+def _rebuild_sqlite_users(existing):
+    """Recreate ``users`` with a nullable email (SQLite cannot ALTER it).
+
+    Foreign keys are not enforced by this app, so dropping the table does not
+    cascade into the child tables that reference it. Only columns that already
+    exist are carried over, so this also works for very old databases.
+    """
+    present = [name for name, _ in _USER_COLUMNS if name in existing]
+    column_list = ", ".join(present)
+    definitions = ",\n    ".join(
+        f"{name} {ddl}" for name, ddl in _USER_COLUMNS if name in existing)
+
+    with db.engine.begin() as connection:
+        # A duplicate phone number would make the unique index below fail and
+        # block startup; detect it first and leave the constraint out in that case.
+        duplicates = connection.exec_driver_sql(
+            "SELECT COUNT(*) FROM (SELECT phone_number FROM users "
+            "WHERE phone_number IS NOT NULL GROUP BY phone_number "
+            "HAVING COUNT(*) > 1)").scalar()
+        constraints = ["PRIMARY KEY (id)", "UNIQUE (username)", "UNIQUE (email)"]
+        if not duplicates:
+            constraints.append("UNIQUE (phone_number)")
+        connection.exec_driver_sql(
+            f"CREATE TABLE users_migrated (\n    {definitions},\n    "
+            + ",\n    ".join(constraints) + "\n)")
+        connection.exec_driver_sql(
+            f"INSERT INTO users_migrated ({column_list}) SELECT {column_list} FROM users")
+        connection.exec_driver_sql("DROP TABLE users")
+        connection.exec_driver_sql("ALTER TABLE users_migrated RENAME TO users")

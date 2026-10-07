@@ -8,8 +8,9 @@ from flask import Blueprint, jsonify, request
 from sqlalchemy import desc, or_
 
 from ..extensions import db
-from ..models import IPScan, IPScanVulnerability, Vulnerability
+from ..models import IPScan, IPScanVulnerability, Scan, Vulnerability
 from ._api_guard import api_login_required
+from ._scope import user_id
 
 bp = Blueprint("vulnerabilities", __name__, url_prefix="/api/vulnerabilities")
 
@@ -27,6 +28,14 @@ def _severity_filter(q, column, severity):
     if severity == "info":
         return q.filter(column.in_(("informational", "info")))
     return q.filter(column == severity)
+
+
+def _finding_owned(v):
+    """A finding belongs to whoever owns the scan that produced it."""
+    if v is None:
+        return False
+    parent = v.scan
+    return parent is not None and parent.user_id == user_id()
 
 
 def _network_to_dict(v):
@@ -53,7 +62,11 @@ def list_vulns():
         limit = min(int(request.args.get("limit", 200)), 1000)
 
         # ---- web findings -------------------------------------------------
-        web_q = Vulnerability.query
+        # Scoped through the owning scan, so a new user's Findings page is empty
+        # and another account's findings are never listed.
+        web_q = (Vulnerability.query
+                 .join(Scan, Vulnerability.scan_id == Scan.id)
+                 .filter(Scan.user_id == user_id()))
         if search:
             like = f"%{search}%"
             web_q = web_q.filter(or_(Vulnerability.name.ilike(like),
@@ -70,7 +83,9 @@ def list_vulns():
             web_q = web_q.filter(Vulnerability.status == status)
 
         # ---- network findings ---------------------------------------------
-        net_q = IPScanVulnerability.query
+        net_q = (IPScanVulnerability.query
+                 .join(IPScan, IPScanVulnerability.scan_id == IPScan.id)
+                 .filter(IPScan.user_id == user_id()))
         if search:
             like = f"%{search}%"
             net_q = net_q.filter(or_(IPScanVulnerability.name.ilike(like),
@@ -82,9 +97,8 @@ def list_vulns():
             net_q = _severity_filter(net_q, IPScanVulnerability.severity, severity)
         if target:
             like = f"%{target}%"
-            net_q = (net_q.join(IPScan, IPScanVulnerability.scan_id == IPScan.id)
-                          .filter(or_(IPScanVulnerability.host_ip.ilike(like),
-                                      IPScan.target.ilike(like))))
+            net_q = net_q.filter(or_(IPScanVulnerability.host_ip.ilike(like),
+                                     IPScan.target.ilike(like)))
         if scan_id:
             net_q = net_q.filter(IPScanVulnerability.scan_id == scan_id)
         if status:
@@ -121,8 +135,13 @@ def list_vulns():
 @api_login_required
 def distinct_targets():
     try:
-        web_targets = {r[0] for r in db.session.query(Vulnerability.target_url).distinct().all() if r[0]}
-        net_targets = {r[0] for r in db.session.query(IPScan.target).distinct().all() if r[0]}
+        web_targets = {r[0] for r in
+                       db.session.query(Vulnerability.target_url)
+                       .join(Scan, Vulnerability.scan_id == Scan.id)
+                       .filter(Scan.user_id == user_id()).distinct().all() if r[0]}
+        net_targets = {r[0] for r in
+                       db.session.query(IPScan.target)
+                       .filter(IPScan.user_id == user_id()).distinct().all() if r[0]}
         return jsonify(targets=sorted(web_targets | net_targets))
     except Exception as exc:
         return jsonify(error=str(exc)), 500
@@ -137,11 +156,11 @@ def _is_network():
 def get_vuln(vuln_id):
     if _is_network():
         v = db.session.get(IPScanVulnerability, vuln_id)
-        if v is None:
+        if not _finding_owned(v):
             return jsonify(error="Finding not found."), 404
         return jsonify(vulnerability=_network_to_dict(v))
     v = db.session.get(Vulnerability, vuln_id)
-    if v is None:
+    if not _finding_owned(v):
         return jsonify(error="Finding not found."), 404
     return jsonify(vulnerability={**v.to_dict(), "source": SOURCE_WEB})
 
@@ -151,7 +170,7 @@ def get_vuln(vuln_id):
 def update_vuln(vuln_id):
     network = _is_network()
     v = db.session.get(IPScanVulnerability if network else Vulnerability, vuln_id)
-    if v is None:
+    if not _finding_owned(v):
         return jsonify(error="Finding not found."), 404
     data = request.get_json(silent=True) or {}
     if "status" in data:
@@ -175,7 +194,7 @@ def update_vuln(vuln_id):
 def delete_vuln(vuln_id):
     network = _is_network()
     v = db.session.get(IPScanVulnerability if network else Vulnerability, vuln_id)
-    if v is None:
+    if not _finding_owned(v):
         return jsonify(error="Finding not found."), 404
     try:
         db.session.delete(v)

@@ -323,6 +323,16 @@
     </div>
   </div>
 
+  <!-- A failed scan must say why: without this an error and a genuinely empty
+       result looked exactly the same to the operator. -->
+  <div class="wsa-error" id="ipResultsError" style="display:none;margin-bottom:16px;">
+    <i class="bi bi-exclamation-triangle"></i>
+    <span id="ipResultsErrorText"></span>
+    <button class="btn btn-sm wsa-btn-ghost" type="button" id="ipResultsRetry">
+      <i class="bi bi-arrow-repeat"></i> Scan again
+    </button>
+  </div>
+
   <div class="ip-summary-grid" id="ipSummaryGrid">
     <div class="ip-summary-card">
       <div class="ip-summary-icon blue"><i class="bi bi-pc-display"></i></div>
@@ -676,6 +686,26 @@
     document.getElementById("ipResultsTarget").textContent =
       `Scan #${scan.scan_number} · ${scan.target} · ${scan.scan_profile} profile`;
 
+    // Show the reason a scan stopped instead of a silent all-zero summary.
+    const errBox = document.getElementById("ipResultsError");
+    if (scan.status === "failed") {
+      document.getElementById("ipResultsErrorText").textContent =
+        "Scan failed: " + (scan.error_message || "the scanner stopped before it produced results.");
+      errBox.style.display = "flex";
+    } else {
+      errBox.style.display = "none";
+    }
+
+    // "Scan again" puts the same target back in the form ready to re-run.
+    const retry = document.getElementById("ipResultsRetry");
+    if (retry) retry.onclick = () => {
+      const input = document.getElementById("ipTarget");
+      if (!input) return;
+      input.value = scan.target || "";
+      input.focus();
+      document.getElementById("ipConfigSection")?.scrollIntoView({ behavior: "smooth" });
+    };
+
     // Summary cards
     document.getElementById("sumHosts").textContent = scan.hosts_discovered || 0;
     document.getElementById("sumPorts").textContent = scan.open_ports_count || 0;
@@ -963,7 +993,7 @@
       <td>${s.low_count || 0}</td>
       <td><span class="ip-history-badge ${s.status}">${s.status}</span></td>
       <td>
-        ${s.status === 'completed' ? `<button class="btn btn-sm wsa-btn wsa-btn-ghost" onclick="viewScanResults(${s.id})"><i class="bi bi-eye"></i></button>` : ''}
+        ${['completed', 'failed'].includes(s.status) ? `<button class="btn btn-sm wsa-btn wsa-btn-ghost" onclick="viewScanResults(${s.id})" title="View results"><i class="bi bi-eye"></i></button>` : ''}
         <button class="btn btn-sm wsa-btn wsa-btn-danger" onclick="deleteScan(${s.id})"><i class="bi bi-trash"></i></button>
       </td>
     </tr>`).join("");
@@ -1006,6 +1036,9 @@
       });
       sock.on("ip_scan_completed", (d) => {
         if (d.scan_id === currentScanId) {
+          if (d.status === "failed") {
+            WSA.toast("IP scan failed: " + (d.error || "unknown error"), "error");
+          }
           loadResults(d.scan_id);
         }
         loadHistory();
@@ -1053,7 +1086,7 @@
       if (scans.length > 0 && (scans[0].status === "running" || scans[0].status === "pending")) {
         currentScanId = scans[0].id;
         showActiveScan(scans[0]);
-      } else if (scans.length > 0 && scans[0].status === "completed") {
+      } else if (scans.length > 0 && (scans[0].status === "completed" || scans[0].status === "failed")) {
         loadResults(scans[0].id);
       }
     }).catch(() => {});

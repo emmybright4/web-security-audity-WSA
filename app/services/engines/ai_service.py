@@ -26,6 +26,47 @@ def availability(config):
     return True, f"{provider} ({model or 'default model'})"
 
 
+def ping(config, timeout=20):
+    """Prove the configured provider + key actually work. Returns (ok, detail).
+
+    Sends one minimal chat request; ``timeout`` is forwarded to the HTTP call
+    so the Settings test button answers quickly instead of hanging on a bad key.
+    """
+    ok, detail = availability(config)
+    if not ok:
+        return False, detail
+    provider = config["AI_PROVIDER"]
+    key = config.get("AI_API_KEY", "")
+    model = config.get("AI_MODEL") or ("gpt-4o-mini" if provider == "openai" else
+                                       "claude-3-5-sonnet-latest" if provider == "anthropic" else
+                                       "default")
+    try:
+        if provider == "anthropic":
+            resp = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": key, "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": model, "max_tokens": 1,
+                      "messages": [{"role": "user", "content": "ping"}]},
+                timeout=timeout)
+        else:
+            # openai + custom (OpenAI-compatible)
+            base = (config.get("AI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+            resp = requests.post(
+                f"{base}/chat/completions",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                json={"model": model, "max_tokens": 1,
+                      "messages": [{"role": "user", "content": "ping"}]},
+                timeout=timeout)
+        resp.raise_for_status()
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else "?"
+        return False, f"{provider} rejected the API key (HTTP {status})."
+    except requests.RequestException as exc:
+        return False, f"Could not reach {provider}: {exc}"
+    return True, f"{provider} accepted the API key ({model})."
+
+
 def _chat(config, system, user, max_tokens=1200):
     ok, detail = availability(config)
     if not ok:

@@ -8,6 +8,7 @@ from sqlalchemy import and_, func
 from ..extensions import db
 from ..models import Scan, Vulnerability
 from ._api_guard import api_login_required
+from ._scope import user_id
 
 bp = Blueprint("dashboard", __name__, url_prefix="/api/dashboard")
 
@@ -68,9 +69,104 @@ MAX_TYPES = 10          # top N vulnerability types on the chart...
 MAX_DATES = 90          # ...and max distinct dates returned
 GRANS = ("day", "week", "month")
 
+# The main dashboard chart (mode=mountain) always plots exactly these three
+# series, in this order. Fixed keys let the front end pin the neon colours.
+MOUNTAIN_KEYS = ("vulnerabilities", "scans", "critical")
+
 # The delta shown next to each stat card compares the most recent N days with
 # the N days immediately before them.
 TREND_WINDOW_DAYS = 7
+
+
+def _mountain_trend(days, gran):
+    """Real security analytics for the main dashboard chart.
+
+    Exactly three series, every point a real row:
+      - Security Scans: scan rows created in the bucket
+      - Vulnerabilities Found: findings recorded in the bucket
+      - Critical Findings: critical-severity findings in the bucket
+
+    Nothing is projected or interpolated: an idle day is a zero, and an
+    account that has never scanned gets empty=True so the UI can show its
+    start-at-zero state. Days with scans but zero findings still render -
+    that is exactly what the account's history looks like.
+    """
+    if gran not in GRANS:
+        gran = "day"
+
+    # Findings are bucketed by their scan's date (falling back to the finding's
+    # own date when the scan row is missing), matching the types/severity view.
+    f_date = func.coalesce(func.date(Scan.created_at),
+                           func.date(Vulnerability.created_at))
+    fq = (db.session.query(f_date, Vulnerability.severity)
+          .outerjoin(Scan, Scan.id == Vulnerability.scan_id)
+          .filter(Scan.user_id == user_id()))
+    sq = db.session.query(func.date(Scan.created_at)).filter(
+        Scan.user_id == user_id())
+    if days > 0:
+        fq = fq.filter(Vulnerability.created_at >= func.date("now", f"-{days} day"))
+        sq = sq.filter(Scan.created_at >= func.date("now", f"-{days} day"))
+    f_rows = fq.all()
+    scan_days = {str(r[0]) for r in sq.all() if r[0]}
+
+    present = sorted({str(r[0]) for r in f_rows if r[0]} | scan_days)
+    if not present:
+        return jsonify(mode="mountain", days=days, gran=gran, dates=[], series=[],
+                       totals={}, empty=True)
+
+    # Same zero-filled axis as the other modes: the whole requested span
+    # exists even where nothing happened, so the curves stay continuous.
+    today = datetime.now(timezone.utc).date()   # rows are UTC; SQLite date('now') is UTC
+    if days > 0:
+        start, end = today - timedelta(days=days), today
+    else:
+        start = date.fromisoformat(present[0][:10])
+        end = max(date.fromisoformat(present[-1][:10]), today)
+        if (end - start).days < 6:              # keep the all-time view readable
+            start = end - timedelta(days=6)
+    span = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    dates = sorted({_gran_key(d.isoformat(), gran) for d in span})
+    if len(dates) > MAX_DATES:
+        dates = dates[-MAX_DATES:]
+    keep = set(dates)
+
+    findings = defaultdict(lambda: {"total": 0, "critical": 0})
+    scans = defaultdict(int)
+    for d, sev in f_rows:
+        if not d:
+            continue
+        k = _gran_key(str(d), gran)
+        if k in keep:
+            findings[k]["total"] += 1
+            if (sev or "").lower() == "critical":
+                findings[k]["critical"] += 1
+    for d in scan_days:
+        k = _gran_key(d, gran)
+        if k in keep:
+            scans[k] += 1
+
+    series = [{
+        "key": key,
+        "label": {
+            "vulnerabilities": "Vulnerabilities Found",
+            "scans": "Security Scans",
+            "critical": "Critical Findings",
+        }[key],
+        "total": {
+            "vulnerabilities": sum(v["total"] for v in findings.values()),
+            "scans": sum(scans.values()),
+            "critical": sum(v["critical"] for v in findings.values()),
+        }[key],
+        "data": {
+            "vulnerabilities": [findings[d]["total"] for d in dates],
+            "scans": [scans[d] for d in dates],
+            "critical": [findings[d]["critical"] for d in dates],
+        }[key],
+    } for key in MOUNTAIN_KEYS]
+
+    return jsonify(mode="mountain", days=days, gran=gran, dates=dates,
+                   series=series, totals={s["key"]: s["total"] for s in series},
+                   empty=False)
 
 
 def _gran_key(d_str, gran):
@@ -95,7 +191,11 @@ def _type_bucket(name):
 
 
 def _grouped_counts(query_filter=None):
-    q = db.session.query(Vulnerability.severity, func.count(Vulnerability.id))
+    # Scoped to the signed-in account: findings are reached through their scan,
+    # so a new user's dashboard starts at zero and never counts anyone else's.
+    q = (db.session.query(Vulnerability.severity, func.count(Vulnerability.id))
+         .join(Scan, Vulnerability.scan_id == Scan.id)
+         .filter(Scan.user_id == user_id()))
     if query_filter is not None:
         q = q.filter(query_filter)
     rows = q.group_by(Vulnerability.severity).all()
@@ -108,7 +208,9 @@ def _grouped_counts(query_filter=None):
 
 def _severity_counts(query_filter=None):
     """Per-severity counts with critical reported separately."""
-    q = db.session.query(Vulnerability.severity, func.count(Vulnerability.id))
+    q = (db.session.query(Vulnerability.severity, func.count(Vulnerability.id))
+         .join(Scan, Vulnerability.scan_id == Scan.id)
+         .filter(Scan.user_id == user_id()))
     if query_filter is not None:
         q = q.filter(query_filter)
     raw = dict(q.group_by(Vulnerability.severity).all())
@@ -127,8 +229,10 @@ def summary():
     """Live totals + comparison with the previous equivalent period."""
     try:
         total_scans = db.session.query(func.count(Scan.id)).filter(
+            Scan.user_id == user_id(),
             Scan.status.in_(["completed", "failed", "cancelled"])).scalar() or 0
-        total_scans_all = db.session.query(func.count(Scan.id)).scalar() or 0
+        total_scans_all = db.session.query(func.count(Scan.id)).filter(
+            Scan.user_id == user_id()).scalar() or 0
         counts = _grouped_counts()
         total_findings = sum(counts.values())
 
@@ -136,14 +240,17 @@ def summary():
         # against the TREND_WINDOW_DAYS days immediately before them. (Splitting
         # the whole history at its mid point produced figures like "+1700%".)
         trend = {"total_scans": None, "high": None, "medium": None, "low": None}
-        newest = db.session.query(func.max(Scan.created_at)).scalar()
+        newest = db.session.query(func.max(Scan.created_at)).filter(
+            Scan.user_id == user_id()).scalar()
         if newest:
             recent_start = newest - timedelta(days=TREND_WINDOW_DAYS)
             previous_start = recent_start - timedelta(days=TREND_WINDOW_DAYS)
 
             recent_scans = db.session.query(func.count(Scan.id)).filter(
+                Scan.user_id == user_id(),
                 Scan.created_at >= recent_start).scalar() or 0
             previous_scans = db.session.query(func.count(Scan.id)).filter(
+                Scan.user_id == user_id(),
                 and_(Scan.created_at >= previous_start,
                      Scan.created_at < recent_start)).scalar() or 0
             trend["total_scans"] = _pct(previous_scans, recent_scans)
@@ -166,7 +273,8 @@ def summary():
             total_findings=total_findings,
             trend=trend,
             sparklines=spark,
-            generated_at=db.session.query(func.max(Scan.completed_at)).scalar(),
+            generated_at=db.session.query(func.max(Scan.completed_at)).filter(
+                Scan.user_id == user_id()).scalar(),
             empty=total_scans_all == 0 and total_findings == 0,
             message=("No scans performed yet. Start your first authorized audit."
                      if total_scans_all == 0 and total_findings == 0 else None),
@@ -193,13 +301,17 @@ def vulnerability_trend():
     """Findings per day, grouped by real vulnerability types or by severity.
 
     Query params:
-      mode=types|severity  (default types)
+      mode=types|severity|mountain  (default types; mountain = the main
+        dashboard chart's fixed three-series security analytics view)
       days=7|14|30|90|0    (0 = all time)
     """
     try:
         mode = (request.args.get("mode") or "types").lower()
-        if mode not in ("types", "severity"):
+        if mode not in ("types", "severity", "mountain"):
             mode = "types"
+        if mode == "mountain":
+            return _mountain_trend(days=request.args.get("days", type=int) or 0,
+                                   gran=(request.args.get("gran") or "day").lower())
         days = request.args.get("days", type=int) or 0
         gran = (request.args.get("gran") or "day").lower()
         if gran not in GRANS:
@@ -210,7 +322,8 @@ def vulnerability_trend():
         date_col = func.coalesce(func.date(Scan.created_at),
                                  func.date(Vulnerability.created_at))
         q = (db.session.query(date_col, Vulnerability.name, Vulnerability.severity)
-             .outerjoin(Scan, Scan.id == Vulnerability.scan_id))
+             .outerjoin(Scan, Scan.id == Vulnerability.scan_id)
+             .filter(Scan.user_id == user_id()))
         if days > 0:
             q = q.filter(Vulnerability.created_at >= func.date("now", f"-{days} day"))
         rows = q.all()
@@ -344,7 +457,9 @@ def live_trend():
         start = buckets[0]
 
         rows = (db.session.query(Vulnerability.created_at, Vulnerability.name)
-                .filter(Vulnerability.created_at >= start).all())
+                .join(Scan, Vulnerability.scan_id == Scan.id)
+                .filter(Scan.user_id == user_id(),
+                        Vulnerability.created_at >= start).all())
 
         index = {b: i for i, b in enumerate(buckets)}
         counts = defaultdict(lambda: defaultdict(int))
@@ -368,6 +483,7 @@ def live_trend():
                   for key, _ in kept]
         events = sum(totals.values())
         scanning = db.session.query(Scan.id).filter(
+            Scan.user_id == user_id(),
             Scan.status.in_((["pending", "running"]))).first() is not None
 
         return jsonify(
@@ -398,7 +514,9 @@ def _sparklines():
     """Per-day finding counts for the last 14 days for mini charts."""
     rows = (db.session.query(func.date(Vulnerability.created_at), Vulnerability.severity,
                              func.count(Vulnerability.id))
-            .filter(Vulnerability.created_at >= func.date("now", "-14 day"))
+            .join(Scan, Vulnerability.scan_id == Scan.id)
+            .filter(Scan.user_id == user_id(),
+                    Vulnerability.created_at >= func.date("now", "-14 day"))
             .group_by(func.date(Vulnerability.created_at), Vulnerability.severity).all())
     by_day = defaultdict(lambda: {"high": 0, "medium": 0, "low": 0, "informational": 0})
     for d, sev, cnt in rows:

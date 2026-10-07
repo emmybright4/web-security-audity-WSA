@@ -45,9 +45,13 @@ def request_cancel(scan_id):
             _cancellations.add(scan_id)
 
 
-def _emit(event, payload):
+def _emit(event, payload, room=None):
+    """Broadcast a scan event to its owner's room (or everyone when no owner)."""
     try:
-        socketio.emit(event, payload)
+        if room:
+            socketio.emit(event, payload, room=room)
+        else:
+            socketio.emit(event, payload)
     except Exception as exc:  # socket down is never fatal
         log.debug("emit %s failed: %s", event, exc)
 
@@ -99,11 +103,15 @@ def _run_scan(app, scan_id):
     target = scan.target_url
     config = app.config
     started = time.time()
+    # Live events are delivered only to the account that owns the scan. Without
+    # this a scan in one workspace pushed findings into everyone else's browser.
+    owner_room = f"user:{scan.user_id}" if scan.user_id else None
 
     _set_scan(scan, status="running", progress=2, started_at=datetime.now(timezone.utc),
               current_step="Initializing scan engines", error_message="")
     _emit("scan_started", {"scan_id": scan_id, "target_url": target,
-                           "scan_type": scan.scan_type, "status": "running", "progress": 2})
+                           "scan_type": scan.scan_type, "status": "running", "progress": 2},
+          room=owner_room)
 
     def progress_cb(pct, label):
         if is_cancelled(scan_id):
@@ -112,7 +120,7 @@ def _run_scan(app, scan_id):
             fresh = db.session.get(Scan, scan_id)
             _set_scan(fresh, progress=max(fresh.progress, int(pct)), current_step=label)
             _emit("scan_progress", {"scan_id": scan_id, "progress": int(pct), "step": label,
-                                    "status": "running"})
+                                    "status": "running"}, room=owner_room)
         except _Cancelled:
             raise
         except Exception as exc:
@@ -169,7 +177,7 @@ def _run_scan(app, scan_id):
                 _emit("new_finding", {
                     "scan_id": scan_id, "id": v.id, "name": v.name, "severity": v.severity,
                     "detected_by": v.detected_by, "url": v.url or v.target_url,
-                })
+                }, room=owner_room)
                 if str(v.severity or "").lower() in ("critical", "high"):
                     # Alert only for a finding that is really stored, using its
                     # own severity, CVE/CVSS fields and scan.
@@ -187,7 +195,7 @@ def _run_scan(app, scan_id):
         _emit("scan_completed", {
             "scan_id": scan_id, "status": "completed", "progress": 100,
             "target_url": target, "findings_count": inserted, **counts,
-        })
+        }, room=owner_room)
         log.info("Scan %s completed: %d findings in %.1fs", scan_id, inserted, time.time() - started)
 
     except _Cancelled:
@@ -195,7 +203,8 @@ def _run_scan(app, scan_id):
         _set_scan(fresh, status="cancelled", current_step="Scan cancelled by user",
                   completed_at=datetime.now(timezone.utc))
         _emit("scan_completed", {"scan_id": scan_id, "status": "cancelled",
-                                 "target_url": target, "findings_count": inserted})
+                                 "target_url": target, "findings_count": inserted},
+              room=owner_room)
     except Exception as exc:
         log.exception("Scan %s failed", scan_id)
         fresh = db.session.get(Scan, scan_id)
@@ -206,7 +215,7 @@ def _run_scan(app, scan_id):
         _notify(notification_service.notify_scan_failed, fresh)
         _emit("scan_completed", {"scan_id": scan_id, "status": "failed",
                                  "target_url": target, "error": str(exc)[:300],
-                                 "findings_count": inserted})
+                                 "findings_count": inserted}, room=owner_room)
     finally:
         with _lock:
             _scan_threads.pop(scan_id, None)
