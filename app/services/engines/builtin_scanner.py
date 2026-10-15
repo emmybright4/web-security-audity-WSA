@@ -83,7 +83,7 @@ def _tls_certificate_check(session, hostname, port, findings, target):
             with ctx.wrap_socket(sock, server_hostname=hostname) as tls:
                 cert = tls.getpeercert() or {}
                 not_after = cert.get("notAfter")
-                if not_after:
+                if isinstance(not_after, str) and not_after:
                     import datetime
                     expiry = datetime.datetime.strptime(not_after, "%b %d %H:%M:%S %Y %Z") \
                         .replace(tzinfo=datetime.timezone.utc)
@@ -141,7 +141,8 @@ def scan(target, options, progress_cb=None):
 
     # 1) TLS checks ----------------------------------------------------------
     if use_https:
-        progress_cb and progress_cb(5, "Inspecting TLS certificate")
+        if progress_cb:
+            progress_cb(5, "Inspecting TLS certificate")
         _tls_certificate_check(session, hostname, port, findings, target)
         summary["requests_made"] += 1
     tick(8, "TLS checks complete")
@@ -178,7 +179,8 @@ def scan(target, options, progress_cb=None):
             url=target)
         return findings, summary
 
-    progress_cb and progress_cb(15, f"Fetched homepage (HTTP {status})")
+    if progress_cb:
+        progress_cb(15, f"Fetched homepage (HTTP {status})")
 
     if status == 401:
         _add_finding(findings, name="HTTP Basic Authentication in Use", severity="informational",
@@ -196,7 +198,8 @@ def scan(target, options, progress_cb=None):
     headers = resp.headers
 
     # 3) Security header audit ------------------------------------------------
-    progress_cb and progress_cb(25, "Auditing security response headers")
+    if progress_cb:
+        progress_cb(25, "Auditing security response headers")
     header_checks = [
         ("strict-transport-security", "Strict-Transport-Security (HSTS) Header Missing", "medium",
          "The site does not send the HSTS header, allowing protocol downgrade and cookie hijacking "
@@ -229,7 +232,8 @@ def scan(target, options, progress_cb=None):
     tick(35, "Security header audit complete")
 
     # 4) Man-in-the-Middle (MITM) checks ------------------------------------------
-    progress_cb and progress_cb(38, "Checking for Man-in-the-Middle vulnerabilities")
+    if progress_cb:
+        progress_cb(38, "Checking for Man-in-the-Middle vulnerabilities")
 
     # 4a) HTTP-to-HTTPS redirect check
     if not use_https:
@@ -340,7 +344,7 @@ def scan(target, options, progress_cb=None):
     if resp.cookies is not None:
         for cookie in resp.cookies:
             flags = []
-            if not cookie.has_nonstandard_attr("Secure"):
+            if not cookie.secure:
                 flags.append("Secure")
             if not cookie.has_nonstandard_attr("HttpOnly"):
                 flags.append("HttpOnly")
@@ -357,7 +361,8 @@ def scan(target, options, progress_cb=None):
     # 7) Insecure form detection ---------------------------------------------------
     import re as _re
     forms = _re.findall(r"<form\b[^>]*>.*?</form>", html, _re.IGNORECASE | _re.DOTALL)
-    progress_cb and progress_cb(45, "Analyzing page content and forms")
+    if progress_cb:
+        progress_cb(45, "Analyzing page content and forms")
     for form in forms:
         action_m = _re.search(r"action\s*=\s*[\"']([^\"']*)[\"']", form, _re.IGNORECASE)
         action = action_m.group(1) if action_m else ""
@@ -414,7 +419,8 @@ def scan(target, options, progress_cb=None):
                      url=final_url)
 
     # 9) Sensitive path probe ------------------------------------------------------------
-    progress_cb and progress_cb(58, "Probing common sensitive paths")
+    if progress_cb:
+        progress_cb(58, "Probing common sensitive paths")
     probes = {
         ".git/HEAD": ("Exposed Git Repository", "high",
                       "The .git directory is publicly accessible; source code and history can be "
@@ -478,7 +484,8 @@ def scan(target, options, progress_cb=None):
     tick(66, "Sensitive path probe complete")
 
     # 10) Light reflection-based XSS probe -----------------------------------------------
-    progress_cb and progress_cb(72, "Running reflection checks")
+    if progress_cb:
+        progress_cb(72, "Running reflection checks")
     xss_payload = "<wsaprobe123>"
     try:
         pr = session.get(target, params={"wsa": xss_payload}, timeout=8)
@@ -496,7 +503,8 @@ def scan(target, options, progress_cb=None):
         pass
 
     # 11) Error-based SQLi signature probe -----------------------------------------------
-    progress_cb and progress_cb(80, "Checking SQL error signatures")
+    if progress_cb:
+        progress_cb(80, "Checking SQL error signatures")
     sqli_probe = "1'"
     try:
         pr = session.get(target, params={"id": sqli_probe}, timeout=8)
@@ -510,13 +518,14 @@ def scan(target, options, progress_cb=None):
             ("Oracle", r"ORA-\d{5}"),
         ]
         for dbms, pattern in signatures:
-            if _re.search(pattern, body, _re.IGNORECASE):
+            match = _re.search(pattern, body, _re.IGNORECASE)
+            if match:
                 _add_finding(findings, name=f"SQL Error Message Disclosure ({dbms})", severity="medium",
                              confidence="firm",
                              description=f"A database error message from {dbms} was returned when a quote "
                                          "was injected into the 'id' parameter. Detailed DB errors confirm "
                                          "unsanitized input reaches the database and aid SQL injection.",
-                             evidence=_re.search(pattern, body, _re.IGNORECASE).group(0)[:150],
+                             evidence=match.group(0)[:150],
                              remediation="Use parameterized queries/prepared statements; disable verbose "
                                          "DB errors in production.",
                              url=target)
@@ -526,7 +535,8 @@ def scan(target, options, progress_cb=None):
 
     # 12) SQLi detail probe when id-like parameter exists ---------------------------------
     if any(p in (target.split("?", 1)[1] if "?" in target else "") for p in SUSPICIOUS_PARAMS):
-        progress_cb and progress_cb(88, "Inspecting injectable-looking parameters")
+        if progress_cb:
+            progress_cb(88, "Inspecting injectable-looking parameters")
         _add_finding(findings, name="Input Parameter Requires Manual SQLi Verification", severity="informational",
                      confidence="tentative",
                      description="The URL contains a parameter commonly targeted by SQL injection. "
@@ -536,5 +546,6 @@ def scan(target, options, progress_cb=None):
                      remediation="Use prepared statements for every DB touchpoint.",
                      url=target)
 
-    progress_cb and progress_cb(100, "Built-in scan complete")
+    if progress_cb:
+        progress_cb(100, "Built-in scan complete")
     return findings, summary
