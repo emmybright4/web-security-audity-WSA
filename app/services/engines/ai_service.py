@@ -92,8 +92,12 @@ def _chat(config, system, user, max_tokens=1200):
             f"{base}/api/chat",
             json={"model": model, "stream": False,
                   "messages": [{"role": "system", "content": system},
-                               {"role": "user", "content": user}]},
-            timeout=120)
+                               {"role": "user", "content": user}],
+                               "options": {
+                                   "num_predict": max_tokens,
+                               },
+                               },
+            timeout=(5, 120))
         resp.raise_for_status()
         return resp.json().get("message", {}).get("content", "")
 
